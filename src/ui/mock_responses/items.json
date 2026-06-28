@@ -1,0 +1,4 @@
+[
+  { "id": 101, "name": "Telemetry Node", "price": 49.99 },
+  { "id": 102, "name": "GraphQL Endpoint License", "price": 199.00 }
+]

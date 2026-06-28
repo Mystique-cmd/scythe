@@ -1,0 +1,6 @@
+{
+  "environment": "sandbox",
+  "debugEnabled": true,
+  "telemetryEndpoint": "https://telemetry.log-drain.net/events",
+  "version": "1.4.2"
+}
