@@ -25,51 +25,29 @@ function logToConsole(message, type = 'info') {
   consoleLog.scrollTop = consoleLog.scrollHeight;
 }
 
-// Helper: safe fetch that reports to console and runs fallback if offline
+// Helper: fixture-only fetch that reports to console.
+// NOTE: The test bench is intentionally offline/deterministic for real extension behavior.
 async function safeFetch(url, options = {}, label = '') {
   const method = options.method || 'GET';
-  logToConsole(`Launching request: ${method} ${label || url}...`, 'info');
-  
-  try {
-    const response = await fetch(url, options);
-    if (response.ok) {
-      logToConsole(`Success: ${method} ${label || url} returned Status ${response.status}`, 'success');
-      return response;
-    } else {
-      logToConsole(`Error response: ${method} ${label || url} returned Status ${response.status}`, 'error');
-      return response;
-    }
-  } catch (error) {
-    logToConsole(`Network failure: ${method} ${label || url} failed (${error.message})`, 'error');
-    // Fallback to local files if httpbin fails/offline
-    if (url.startsWith('https://httpbin.org/')) {
-      logToConsole(`Attempting local fallback for ${label || url}...`, 'warning');
-      const fallbackUrl = getLocalFallbackUrl(url);
-      try {
-        const fbRes = await fetch(fallbackUrl, {
-          ...options,
-          method: 'GET' // Chrome only allows GET to extension files
-        });
-        logToConsole(`Fallback success: GET ${fallbackUrl} returned Status ${fbRes.status}`, 'success');
-        return fbRes;
-      } catch (fbErr) {
-        logToConsole(`Fallback failed: ${fbErr.message}`, 'error');
-      }
-    }
-    throw error;
+
+  // Hard guard: never allow cross-origin / external network calls from the bench.
+  if (/^https?:\/\//i.test(url) || url.startsWith('chrome://') || url.startsWith('file://')) {
+    logToConsole(`Blocked external request from test bench: ${method} ${label || url}`, 'error');
+    return Promise.reject(new Error('External requests are disabled in the Test Bench.'));
   }
+
+  logToConsole(`Launching request: ${method} ${label || url}...`, 'info');
+
+  const response = await fetch(url, options);
+  if (response.ok) {
+    logToConsole(`Success: ${method} ${label || url} returned Status ${response.status}`, 'success');
+  } else {
+    logToConsole(`Error response: ${method} ${label || url} returned Status ${response.status}`, 'error');
+  }
+
+  return response;
 }
 
-// Fallback mapper for offline mode
-function getLocalFallbackUrl(url) {
-  if (url.includes('/status/500')) {
-    return 'mock_responses/non_existent_file_triggering_404.json';
-  }
-  if (url.includes('/post')) {
-    return 'mock_responses/check_permissions.json?fallback=post_action';
-  }
-  return 'mock_responses/config.json';
-}
 
 function setupClickListeners() {
   // Scenario 1: Parallel Burst (Sequential Fan-out)
@@ -89,110 +67,97 @@ function setupClickListeners() {
   document.getElementById('btn-checkact').addEventListener('click', async () => {
     logToConsole('--- SCENARIO: Check-Then-Act ---', 'info');
     
-    // Step A: GET verification
+    // Step A: GET verification (fixture)
     const verifyRes = await safeFetch('mock_responses/check_permissions.json?action=validate_permissions', {}, 'check_permissions.json');
     
     if (verifyRes) {
       logToConsole('Permissions check complete. Simulating 300ms processing delay...', 'info');
       await new Promise(resolve => setTimeout(resolve, 300));
       
-      // Step B: Mutating POST
-      await safeFetch('https://httpbin.org/post', {
+      // Step B: Mutating POST (fixture-based simulated endpoint)
+      await safeFetch('mock_responses/check_permissions.json?fallback=post_action', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'checkout_buy', user: 'user_dev_881' })
-      }, 'POST /api/checkout/buy');
+      }, 'POST /api/checkout/buy (fixture)');
     }
     
     logToConsole('Scenario 2 finished.', 'success');
   });
 
-  // Scenario 3: Multi-Domain Sync
-  document.getElementById('btn-crossdomain').addEventListener('click', async () => {
-    logToConsole('--- SCENARIO: Multi-Domain Sync ---', 'info');
-    
-    // Fire to local extension, external API, and telemetry host
-    await safeFetch('mock_responses/config.json', {}, 'config.json (local)');
-    
-    try {
-      await safeFetch('https://httpbin.org/get?domain=partner-identity', {}, 'httpbin.org (remote)');
-    } catch(e) {}
 
-    await safeFetch('mock_responses/analytics.json?event=sync', {}, 'analytics.json (telemetry)');
-    
+  // Scenario 3: Multi-Domain Sync (fixture-only)
+  document.getElementById('btn-crossdomain').addEventListener('click', async () => {
+    logToConsole('--- SCENARIO: Multi-Domain Sync (fixture-only) ---', 'info');
+
+    // Fire to multiple fixture endpoints
+    await safeFetch('mock_responses/config.json', {}, 'config.json');
+    await new Promise(resolve => setTimeout(resolve, 80));
+    await safeFetch('mock_responses/users.json', {}, 'users.json');
+    await new Promise(resolve => setTimeout(resolve, 80));
+    await safeFetch('mock_responses/analytics.json?event=sync', {}, 'analytics.json');
+
     logToConsole('Scenario 3 finished.', 'success');
   });
 
-  // Scenario 4: GraphQL Checkout (Multiple Mutations)
+
+  // Scenario 4: GraphQL Checkout (fixture-only)
   document.getElementById('btn-graphql').addEventListener('click', async () => {
-    logToConsole('--- SCENARIO: GraphQL Checkout ---', 'info');
-    
-    // Mutation 1: createCart
-    await safeFetch('https://httpbin.org/post?op=createCart', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        query: 'mutation createCart($id: ID!) { createCart(id: $id) { id total } }',
-        variables: { id: '99281' },
-        operationName: 'createCart'
-      })
-    }, 'GraphQL: createCart');
+    logToConsole('--- SCENARIO: GraphQL Checkout (fixture-only) ---', 'info');
+
+    // The real extension detects GraphQL by parsing request bodies captured by DevTools.
+    // The test bench does not generate actual GraphQL network calls (offline mode),
+    // but we still hit multiple JSON fixtures representing payloads.
+    await safeFetch('mock_responses/items.json', {}, 'GraphQL fixture: createCart (represented)');
 
     logToConsole('Cart created. Firing second mutation...', 'info');
-    await new Promise(resolve => setTimeout(resolve, 150));
+    await new Promise(resolve => setTimeout(resolve, 120));
 
-    // Mutation 2: submitPayment
-    await safeFetch('https://httpbin.org/post?op=submitPayment', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        query: 'mutation submitPayment($cartId: ID!, $amount: Float!) { submitPayment(cartId: $cartId, amount: $amount) { success transactionId } }',
-        variables: { cartId: '99281', amount: 249.99 },
-        operationName: 'submitPayment'
-      })
-    }, 'GraphQL: submitPayment');
-    
+    await safeFetch('mock_responses/check_permissions.json', {}, 'GraphQL fixture: submitPayment (represented)');
+
     logToConsole('Scenario 4 finished.', 'success');
   });
 
-  // Scenario 5: Faulty Transaction (Mixed Status)
+
+  // Scenario 5: Faulty Transaction (Mixed Status) - fixture-only
   document.getElementById('btn-mixed').addEventListener('click', async () => {
-    logToConsole('--- SCENARIO: Faulty Transaction ---', 'info');
-    
-    // Call 1: Success (200 OK)
+    logToConsole('--- SCENARIO: Faulty Transaction (fixture-only) ---', 'info');
+
+    // Call 1: Success (fixture)
     await safeFetch('mock_responses/users.json', {}, 'users.json');
-    
-    // Call 2: Failure (500 Error / 404 Fallback)
+
+    // Call 2: Failure (simulate error by requesting a non-existing fixture)
+    // This will still be captured as a failing network request by DevTools.
     try {
-      await safeFetch('https://httpbin.org/status/500', {}, 'status/500 (remote error)');
-    } catch(e) {}
-    
+      await safeFetch('mock_responses/__missing_fixture__.json', {}, 'missing fixture (expected 404)');
+    } catch (e) {
+      // expected
+    }
+
     logToConsole('Scenario 5 finished.', 'success');
   });
 
-  // Scenario 6: Staged Polling Loop
+
+  // Scenario 6: Staged Polling Loop - fixture-only
   document.getElementById('btn-polling').addEventListener('click', async () => {
-    logToConsole('--- SCENARIO: Staged Polling Loop ---', 'info');
-    
-    // Start job
-    await safeFetch('https://httpbin.org/post?action=export_pdf', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ job: 'export_pdf' })
-    }, 'POST /api/jobs/export');
+    logToConsole('--- SCENARIO: Staged Polling Loop (fixture-only) ---', 'info');
+
+    // Start job (fixture)
+    await safeFetch('mock_responses/job_status_pending.json?start=1', {}, 'start job (fixture)');
 
     // Poll 1: Pending
-    await new Promise(resolve => setTimeout(resolve, 300));
+    await new Promise(resolve => setTimeout(resolve, 250));
     await safeFetch('mock_responses/job_status_pending.json?attempt=1', {}, 'job_status_pending.json?attempt=1');
 
     // Poll 2: Pending
-    await new Promise(resolve => setTimeout(resolve, 300));
+    await new Promise(resolve => setTimeout(resolve, 250));
     await safeFetch('mock_responses/job_status_pending.json?attempt=2', {}, 'job_status_pending.json?attempt=2');
 
     // Poll 3: Completed
-    await new Promise(resolve => setTimeout(resolve, 300));
+    await new Promise(resolve => setTimeout(resolve, 250));
     await safeFetch('mock_responses/job_status_complete.json?attempt=3', {}, 'job_status_complete.json?attempt=3');
-    
+
     logToConsole('Scenario 6 finished.', 'success');
   });
+
 }
