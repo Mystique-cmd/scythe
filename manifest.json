@@ -21,15 +21,7 @@
     }
   ],
   "devtools_page": "src/devtools.html",
-  "web_accessible_resources": [
-    {
-      "resources": [
-        "src/ui/test_bench.html",
-        "src/ui/test_bench.js"
-      ],
-      "matches": ["<all_urls>"]
-    }
-  ],
+
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",

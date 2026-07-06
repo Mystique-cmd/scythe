@@ -1007,19 +1007,8 @@ function setupUIEventListeners() {
     renderWorkflowList();
   });
 
-  // Open Test Bench
-  const testBenchHandler = () => {
-    const testBenchUrl = chrome.runtime.getURL('src/ui/test_bench.html');
-    if (typeof chrome !== 'undefined' && chrome.tabs) {
-      chrome.tabs.create({ url: testBenchUrl });
-    } else {
-      window.open(testBenchUrl);
-    }
-  };
-  
-  document.getElementById('open-test-bench').addEventListener('click', testBenchHandler);
-  document.getElementById('trigger-sample-btn').addEventListener('click', testBenchHandler);
 }
+
 
 // HTML Escaping Utility
 function escapeHtml(str) {
