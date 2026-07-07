@@ -906,3 +906,287 @@ body {
   color: rgb(236, 72, 153);
   border: 1px solid rgba(236, 72, 153, 0.2);
 }
+
+/* ==========================================
+   Atomicity Dashboard & File Import Styles
+   ========================================== */
+
+.dashboard-state {
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  background-color: #0d131f;
+  animation: itemFadeIn 0.3s ease;
+  overflow-y: auto;
+}
+
+.dashboard-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 16px;
+}
+
+.dashboard-title-area h2 {
+  font-size: 20px;
+  font-weight: 700;
+  margin-top: 4px;
+  letter-spacing: -0.02em;
+}
+
+.dashboard-badge {
+  font-size: 9px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background-color: var(--color-primary-glow);
+  color: var(--color-primary);
+  border: 1px solid rgba(139, 92, 246, 0.2);
+}
+
+.dashboard-subtitle {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 16px;
+}
+
+.metric-card {
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-color);
+  padding: 20px;
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  transition: all 0.2s ease;
+}
+
+.metric-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--border-color-focus);
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.2);
+}
+
+.metric-val {
+  font-size: 28px;
+  font-weight: 700;
+  color: #fff;
+  margin-bottom: 4px;
+}
+
+#metric-atomicity-score {
+  background: linear-gradient(90deg, #10b981, #3b82f6);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.metric-lbl {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  letter-spacing: 0.05em;
+  margin-bottom: 6px;
+}
+
+.metric-desc {
+  font-size: 11px;
+  color: var(--text-dark);
+  line-height: 1.3;
+}
+
+.dashboard-sections-row {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 20px;
+}
+
+.dashboard-section-box {
+  background-color: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 20px;
+}
+
+.dashboard-section-box h3 {
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  margin-bottom: 16px;
+}
+
+.section-helper {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 16px;
+  line-height: 1.4;
+}
+
+/* Progress bar charts */
+.chart-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.chart-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.chart-label-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+}
+
+.chart-label-name {
+  font-weight: 500;
+  color: var(--text-main);
+}
+
+.chart-label-val {
+  color: var(--text-muted);
+}
+
+.chart-bar-bg {
+  height: 8px;
+  background-color: rgba(255, 255, 255, 0.05);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.chart-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--color-primary), #60a5fa);
+  border-radius: 4px;
+  transition: width 0.5s ease-out;
+}
+
+/* Import drop zone styles */
+.import-zone {
+  border: 2px dashed rgba(139, 92, 246, 0.3);
+  background-color: rgba(139, 92, 246, 0.02);
+  border-radius: 12px;
+  padding: 40px 20px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  cursor: pointer;
+  margin-top: 10px;
+}
+
+.import-zone.dragover {
+  border-color: var(--color-primary);
+  background-color: rgba(139, 92, 246, 0.08);
+  box-shadow: inset 0 0 20px rgba(139, 92, 246, 0.1);
+}
+
+.import-zone-icon {
+  margin-bottom: 12px;
+  transition: transform 0.2s;
+}
+
+.import-zone:hover .import-zone-icon {
+  transform: translateY(-4px);
+}
+
+/* Recommendations table */
+.recommendations-table-wrapper {
+  overflow-x: auto;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background-color: var(--bg-app);
+}
+
+.recommendations-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 12px;
+}
+
+.recommendations-table th {
+  background-color: rgba(255, 255, 255, 0.02);
+  padding: 10px 14px;
+  font-weight: 600;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.recommendations-table td {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border-color);
+  vertical-align: top;
+  line-height: 1.4;
+}
+
+.recommendations-table tr:last-child td {
+  border-bottom: none;
+}
+
+.recommendations-table tr:hover td {
+  background-color: rgba(255, 255, 255, 0.01);
+}
+
+.endpoint-flow-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.endpoint-flow-item {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background-color: rgba(255, 255, 255, 0.03);
+  color: #a7f3d0;
+  word-break: break-all;
+  display: inline-block;
+}
+
+.endpoint-flow-arrow {
+  color: var(--text-dark);
+  font-size: 10px;
+  margin: 2px 0 2px 8px;
+}
+
+.recommendation-text {
+  color: var(--text-muted);
+}
+
+.recommendation-action {
+  color: var(--color-info);
+  font-weight: 500;
+  margin-top: 4px;
+}
+
+.patterns-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.pattern-tag {
+  font-size: 9px;
+  font-weight: 600;
+  padding: 2px 5px;
+  border-radius: 4px;
+  background-color: var(--color-warning-glow);
+  color: var(--color-warning);
+}
+

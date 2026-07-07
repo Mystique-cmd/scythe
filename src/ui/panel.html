@@ -11,13 +11,17 @@
     <div class="header-logo">
       <div class="logo-icon"></div>
       <h1>Workflow <span>Detector</span></h1>
-      <span class="status-badge"><span class="pulse-dot"></span>Active</span>
+      <span id="status-badge" class="status-badge"><span id="status-dot" class="pulse-dot"></span>Active</span>
     </div>
     <div class="header-actions">
 
       <button id="clear-btn" class="btn btn-secondary" title="Clear all recorded events and requests">
         <svg class="icon" viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
         Clear
+      </button>
+      <button id="import-btn" class="btn btn-secondary" title="Import file (HAR or Scythe export) to analyze atomicity">
+        <svg class="icon" viewBox="0 0 24 24" style="width: 14px; height: 14px; margin-right: 4px; fill: none; stroke: currentColor; stroke-width: 2;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+        Import File
       </button>
       <button id="export-btn" class="btn btn-secondary" title="Export data as JSON">
         <svg class="icon" viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
@@ -89,7 +93,74 @@
         <div class="empty-icon">⚡</div>
         <h3>No Workflow Selected</h3>
         <p>Trigger actions on the page (clicks, keystrokes, form submissions) or select an item from the sidebar to inspect its multi-flow details.</p>
+      </div>
 
+      <!-- Dashboard State (shown when a file is imported and no workflow is selected) -->
+      <div id="dashboard-state" class="dashboard-state" style="display: none;">
+        <div class="dashboard-header">
+          <div class="dashboard-title-area">
+            <span class="dashboard-badge">ANALYSIS REPORT</span>
+            <h2 id="dashboard-title">Endpoint Atomicity Dashboard</h2>
+            <p id="dashboard-subtitle" class="dashboard-subtitle">File: test.har</p>
+          </div>
+          <button id="close-dashboard-btn" class="btn btn-secondary btn-sm" title="Clear analysis and return to live mode">
+            Live Mode
+          </button>
+        </div>
+
+        <div class="dashboard-grid">
+          <!-- Metrics Cards -->
+          <div class="metric-card">
+            <div class="metric-val" id="metric-atomicity-score">0%</div>
+            <div class="metric-lbl">Atomicity Score</div>
+            <div class="metric-desc">Percentage of flows that are atomic (1 request)</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-val" id="metric-total-flows">0</div>
+            <div class="metric-lbl">Total Flows</div>
+            <div class="metric-desc">Clustered transaction sequences</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-val" id="metric-non-atomic">0</div>
+            <div class="metric-lbl">Non-Atomic Flows</div>
+            <div class="metric-desc">Flows with 2+ related requests</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-val" id="metric-violations">0</div>
+            <div class="metric-lbl">Orchestration Alerts</div>
+            <div class="metric-desc">Flows triggering heuristic rules</div>
+          </div>
+        </div>
+
+        <div class="dashboard-sections-row">
+          <!-- Heuristic Distribution -->
+          <div class="dashboard-section-box">
+            <h3>Orchestration Pattern Prevalence</h3>
+            <div class="chart-list" id="dashboard-patterns-list">
+              <!-- Rendered pattern progress bars -->
+            </div>
+          </div>
+        </div>
+
+        <!-- Consolidation Recommendations Table -->
+        <div class="dashboard-section-box recommendations-box">
+          <h3>Non-Atomic Endpoints & Consolidation Recommendations</h3>
+          <p class="section-helper">The following endpoints are frequently executed as part of multi-step client-side workflows. Consider consolidating them on the backend to achieve atomic, single-roundtrip execution.</p>
+          <div class="recommendations-table-wrapper">
+            <table class="recommendations-table">
+              <thead>
+                <tr>
+                  <th>Endpoint Sequence</th>
+                  <th>Observed Patterns</th>
+                  <th width="300px">Consolidation Recommendation</th>
+                </tr>
+              </thead>
+              <tbody id="recommendations-tbody">
+                <!-- Recommendations will be populated here -->
+              </tbody>
+            </table>
+          </div>
+        </div>
       </div>
 
       <!-- Detail View (hidden/populated dynamically) -->
@@ -205,6 +276,29 @@
       </div>
     </section>
   </main>
+  <!-- Import Modal (hidden by default) -->
+  <div id="import-modal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>Analyze Endpoint Atomicity</h2>
+        <button id="close-import" class="close-btn">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p style="font-size: 12px; color: var(--text-muted); line-height: 1.5; margin-bottom: 10px;">
+          Upload a <strong>HAR (HTTP Archive)</strong> log or a previously exported <strong>Scythe JSON</strong> file. Scythe will analyze the requests to identify non-atomic endpoint flows.
+        </p>
+        <div class="import-zone" id="import-drop-zone">
+          <svg class="import-zone-icon" viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--color-primary); filter: drop-shadow(0 0 8px var(--color-primary-glow)); margin-bottom: 12px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+          <p class="import-zone-main" style="font-size: 13px; font-weight: 600; color: var(--text-main); margin-bottom: 4px;">Drag and drop your file here</p>
+          <p class="import-zone-sub" style="font-size: 11px; color: var(--text-muted); margin-bottom: 16px;">Supports .har or .json files</p>
+          <button id="browse-btn" class="btn btn-primary btn-sm">Browse Files</button>
+          <input type="file" id="import-file-input" accept=".har,.json" style="display: none;">
+        </div>
+        <div id="import-error" class="error-banner" style="display: none; background-color: var(--color-danger-glow); border: 1px solid rgba(239, 68, 68, 0.2); padding: 10px; border-radius: 6px; font-size: 12px; color: var(--color-danger); margin-top: 10px;"></div>
+      </div>
+    </div>
+  </div>
+
   <script src="panel.js"></script>
 </body>
 </html>

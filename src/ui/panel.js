@@ -12,6 +12,11 @@ let settings = {
   preserveLog: true
 };
 
+// Imported Mode State
+let isImportedMode = false;
+let importedFilename = '';
+let liveStateBackup = null;
+
 // Background connection
 let backgroundPageConnection = null;
 
@@ -22,6 +27,7 @@ document.addEventListener('DOMContentLoaded', () => {
   setupUIEventListeners();
   renderWorkflowList();
   updateDetailsPane();
+  updateStatusBadge();
 });
 
 // Load Settings from storage
@@ -58,9 +64,7 @@ function saveSettings() {
   // Re-run heuristics on all workflows with new settings
   workflows.forEach(w => runHeuristics(w));
   renderWorkflowList();
-  if (selectedWorkflowId) {
-    updateDetailsPane();
-  }
+  updateDetailsPane();
   
   closeModal('settings-modal');
 }
