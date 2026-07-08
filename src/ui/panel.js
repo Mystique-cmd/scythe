@@ -1011,7 +1011,567 @@ function setupUIEventListeners() {
     renderWorkflowList();
   });
 
+  // Import modal + dashboard actions
+  setupImportUI();
 }
+
+// =========================
+// IMPORT / UPLOAD ANALYZER
+// =========================
+
+function setupImportUI() {
+  const importModal = document.getElementById('import-modal');
+  const closeImport = document.getElementById('close-import');
+  const browseBtn = document.getElementById('browse-btn');
+  const fileInput = document.getElementById('import-file-input');
+  const dropZone = document.getElementById('import-drop-zone');
+  const importError = document.getElementById('import-error');
+  const importBtn = document.getElementById('import-btn');
+
+  if (!importModal || !closeImport || !browseBtn || !fileInput || !dropZone || !importError) {
+    console.warn('[Workflow Detector] Import UI elements missing; skipping import setup.');
+    return;
+  }
+
+  if (importBtn) {
+    importBtn.addEventListener('click', () => {
+      importError.style.display = 'none';
+      fileInput.value = '';
+      openModal('import-modal');
+    });
+  }
+
+  closeImport.addEventListener('click', () => closeModal('import-modal'));
+
+  browseBtn.addEventListener('click', () => fileInput.click());
+
+  fileInput.addEventListener('change', async (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    await analyzeUploadedFile(file);
+  });
+
+  // Drag and drop
+  const prevent = (ev) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+  };
+
+  ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+    dropZone.addEventListener(eventName, prevent);
+  });
+
+  dropZone.addEventListener('drop', async (ev) => {
+    prevent(ev);
+    const file = ev.dataTransfer && ev.dataTransfer.files && ev.dataTransfer.files[0];
+    if (!file) return;
+    await analyzeUploadedFile(file);
+  });
+
+  // Dashboard: return to live mode
+  const closeDashboardBtn = document.getElementById('close-dashboard-btn');
+  if (closeDashboardBtn) {
+    closeDashboardBtn.addEventListener('click', () => {
+      isImportedMode = false;
+      closeModal('import-modal');
+      document.getElementById('dashboard-state').style.display = 'none';
+      detailsPaneToEmpty();
+    });
+  }
+}
+
+function detailsPaneToEmpty() {
+  // Return to live sidebar/details state without forcing workflow selection.
+  const detailsPane = document.getElementById('details-pane');
+  const detailsContent = detailsPane.querySelector('.details-content');
+  const emptyState = detailsPane.querySelector('.empty-state');
+
+  detailsPane.classList.add('empty');
+  detailsContent.style.display = 'none';
+  emptyState.style.display = 'flex';
+
+  // Hide dashboard
+  const dashboardState = document.getElementById('dashboard-state');
+  if (dashboardState) dashboardState.style.display = 'none';
+}
+
+async function analyzeUploadedFile(file) {
+  const importError = document.getElementById('import-error');
+  const fileName = file.name || 'uploaded-file';
+
+  try {
+    importError.style.display = 'none';
+    importError.textContent = '';
+
+    const text = await file.text();
+    const isHar = fileName.toLowerCase().endsWith('.har');
+
+    let parsed;
+    try {
+      parsed = JSON.parse(text);
+    } catch (e) {
+      throw new Error('Uploaded file is not valid JSON.');
+    }
+
+    let flows;
+    if (isHar || (parsed && parsed.log && Array.isArray(parsed.log.entries))) {
+      flows = parseHarToFlows(parsed);
+    } else {
+      flows = parseScytheOrEndpointJsonToFlows(parsed);
+    }
+
+    // Run atomicity analysis + heuristic validations
+    isImportedMode = true;
+    importedFilename = fileName;
+
+    // Replace current workflows with imported flows for UI compatibility
+    workflows = flows;
+    selectedWorkflowId = null;
+
+    // Compute and render dashboard
+    renderAtomicityDashboard(flows);
+
+    // Swap UI into dashboard state
+    document.getElementById('dashboard-state').style.display = 'block';
+    const subtitle = document.getElementById('dashboard-subtitle');
+    if (subtitle) subtitle.textContent = `File: ${fileName}`;
+
+    closeModal('import-modal');
+
+    // Render sidebar list for imported flows too
+    renderWorkflowList();
+    updateDetailsPane();
+
+  } catch (err) {
+    console.error('[Workflow Detector] Import analysis failed:', err);
+    importError.textContent = err && err.message ? err.message : String(err);
+    importError.style.display = 'block';
+  }
+}
+
+function parseScytheOrEndpointJsonToFlows(json) {
+  // Supports BOTH:
+  // - array: [{method,url,...}, ...]
+  // - object: { endpoints:[...] }
+  // - scythe export: [{ type, detail, timestamp, requests:[...] }, ...]
+
+  const now = Date.now();
+
+  // If it looks like Scythe export
+  if (Array.isArray(json) && json.length && json[0] && (json[0].requests || json[0].heuristics)) {
+    return json.map((w, idx) => normalizeImportedWorkflow(w, idx, now));
+  }
+
+  if (json && json.workflows && Array.isArray(json.workflows)) {
+    return json.workflows.map((w, idx) => normalizeImportedWorkflow(w, idx, now));
+  }
+
+  const endpoints = Array.isArray(json) ? json : (json && Array.isArray(json.endpoints) ? json.endpoints : null);
+  if (!endpoints) {
+    // If it is a HAR-like object, fall back to HAR parser
+    if (json && json.log && Array.isArray(json.log.entries)) return parseHarToFlows(json);
+    throw new Error('Unsupported JSON format for endpoint upload. Expected HAR or an endpoints array/object.');
+  }
+
+  // Each endpoint is treated as its own request; we need flows/clusters.
+  // Heuristic clustering: group consecutive endpoints into a flow when URLs share a common base path OR time gap is small.
+  const requests = endpoints.map((ep, i) => normalizeEndpointToRequest(ep, i));
+
+  const flows = [];
+  let current = {
+    id: generateId(),
+    type: 'imported',
+    detail: 'Imported endpoint sequence',
+    timestamp: now + iota(0),
+    requests: [],
+    heuristics: [],
+    severity: 'none',
+    score: 0
+  };
+
+  for (let i = 0; i < requests.length; i++) {
+    const r = requests[i];
+    const prev = current.requests[current.requests.length - 1];
+
+    if (!prev) {
+      current.requests.push(r);
+      continue;
+    }
+
+    const prevTime = new Date(prev.startedDateTime).getTime();
+    const currTime = new Date(r.startedDateTime).getTime();
+    const timeGap = Math.abs(currTime - prevTime);
+
+    const prevPath = getPathname(prev.request.url);
+    const currPath = getPathname(r.request.url);
+
+    const shouldCluster = timeGap <= settings.associationWindow || prevPath.split('/').slice(0,2).join('/') === currPath.split('/').slice(0,2).join('/');
+
+    if (shouldCluster) {
+      current.requests.push(r);
+    } else {
+      flows.push(finalizeImportedWorkflow(current));
+      current = {
+        id: generateId(),
+        type: 'imported',
+        detail: 'Imported endpoint sequence',
+        timestamp: now + iota(flows.length + 1),
+        requests: [r],
+        heuristics: [],
+        severity: 'none',
+        score: 0
+      };
+    }
+  }
+
+  if (current.requests.length) flows.push(finalizeImportedWorkflow(current));
+
+  return flows;
+}
+
+function iota(n) {
+  // deterministic tiny offset
+  return n * 10;
+}
+
+function normalizeImportedWorkflow(w, idx, now) {
+  const workflow = {
+    id: w.id || `imported-${idx}`,
+    type: w.type || 'imported',
+    detail: w.detail || 'Imported workflow',
+    timestamp: typeof w.timestamp === 'number' ? w.timestamp : (now + idx * 50),
+    requests: [],
+    heuristics: [],
+    severity: w.severity || 'none',
+    score: w.score || 0
+  };
+
+  // If it already has requests in scythe export shape
+  if (Array.isArray(w.requests)) {
+    workflow.requests = w.requests.map((r, i) => normalizeRequestShim(r, i));
+  }
+
+  return finalizeImportedWorkflow(workflow);
+}
+
+function normalizeEndpointToRequest(ep, idx) {
+  const url = ep.url || ep.endpoint || ep.path || '';
+  const method = (ep.method || ep.httpMethod || 'GET').toUpperCase();
+
+  const graphql = ep.graphql || (ep.type && ep.query ? { type: ep.type, operationName: ep.operationName || 'anonymous', variables: ep.variables || {}, query: ep.query } : null);
+
+  // For our heuristics engine compatibility we create a request shim that looks like DevTools requestFinished object
+  const startedDateTime = typeof ep.startedDateTime === 'number'
+    ? ep.startedDateTime
+    : (typeof ep.time === 'number' ? (Date.now() - (endOffsetFromDuration(ep.time) + idx)) : Date.now() + idx);
+
+  const status = typeof ep.status === 'number' ? ep.status : (typeof ep.responseStatus === 'number' ? ep.responseStatus : 200);
+
+  return {
+    request: {
+      method,
+      url,
+      headers: Array.isArray(ep.headers) ? ep.headers : [],
+      queryString: Array.isArray(ep.queryString) ? ep.queryString : (Array.isArray(ep.query) ? ep.query : []),
+      postData: ep.body ? { text: typeof ep.body === 'string' ? ep.body : JSON.stringify(ep.body) } : (ep.postData || null)
+    },
+    response: {
+      status,
+      headers: Array.isArray(ep.responseHeaders) ? ep.responseHeaders : [],
+      bodySize: ep.bodySize || 0,
+      content: ep.content || null
+    },
+    time: typeof ep.time === 'number' ? ep.time : 50,
+    startedDateTime: new Date(startedDateTime).toISOString(),
+    _graphql: graphql
+  };
+}
+
+function endOffsetFromDuration(ms) {
+  return Math.max(0, ms);
+}
+
+function normalizeRequestShim(r, i) {
+  // Compatible with our export schema from exportData() in this repo.
+  return {
+    request: {
+      url: r.url || '',
+      method: (r.method || 'GET').toUpperCase(),
+      headers: [],
+      queryString: [],
+      postData: null
+    },
+    response: {
+      status: r.status || 200,
+      headers: [],
+      bodySize: 0,
+      content: null
+    },
+    time: typeof r.time === 'number' ? r.time : 50,
+    startedDateTime: r.startedDateTime || new Date(Date.now() + i * 10).toISOString(),
+    _graphql: r.graphql || null
+  };
+}
+
+function finalizeImportedWorkflow(w) {
+  // Convert any request shims missing startedDateTime/time/status
+  if (!Array.isArray(w.requests)) w.requests = [];
+
+  // Ensure request shape minimal compatibility for heuristics
+  w.requests.forEach(req => {
+    if (!req.startedDateTime) req.startedDateTime = new Date().toISOString();
+    if (!req.time) req.time = 50;
+    if (!req.response) req.response = { status: 200 };
+    if (!req.request) req.request = { method: 'GET', url: '' };
+    if (!req.request.method) req.request.method = 'GET';
+    if (!req.request.url) req.request.url = '';
+    if (!req.request.headers) req.request.headers = [];
+    if (!req.request.queryString) req.request.queryString = [];
+  });
+
+  // Run heuristics to populate findings
+  runHeuristics(w);
+  return w;
+}
+
+function parseHarToFlows(har) {
+  // HAR has log.entries; we create best-effort flows by time gaps.
+  const entries = (har && har.log && Array.isArray(har.log.entries)) ? har.log.entries : [];
+  if (!entries.length) throw new Error('HAR file contains no entries.');
+
+  const now = Date.now();
+  const flows = [];
+
+  const sorted = [...entries].sort((a, b) => {
+    const aT = new Date(a.startedDateTime || now).getTime();
+    const bT = new Date(b.startedDateTime || now).getTime();
+    return aT - bT;
+  });
+
+  let current = {
+    id: generateId(),
+    type: 'imported-har',
+    detail: 'HAR imported flow',
+    timestamp: new Date(sorted[0].startedDateTime || now).getTime(),
+    requests: [],
+    heuristics: [],
+    severity: 'none',
+    score: 0
+  };
+
+  for (let i = 0; i < sorted.length; i++) {
+    const e = sorted[i];
+    const r = harEntryToRequestShim(e);
+
+    const prev = current.requests[current.requests.length - 1];
+    if (!prev) {
+      current.requests.push(r);
+      continue;
+    }
+
+    const prevT = new Date(prev.startedDateTime).getTime();
+    const currT = new Date(r.startedDateTime).getTime();
+    const gap = Math.abs(currT - prevT);
+
+    if (gap <= settings.associationWindow) {
+      current.requests.push(r);
+    } else {
+      flows.push(finalizeImportedWorkflow(current));
+      current = {
+        id: generateId(),
+        type: 'imported-har',
+        detail: 'HAR imported flow',
+        timestamp: new Date(e.startedDateTime || now).getTime(),
+        requests: [r],
+        heuristics: [],
+        severity: 'none',
+        score: 0
+      };
+    }
+  }
+
+  if (current.requests.length) flows.push(finalizeImportedWorkflow(current));
+
+  return flows;
+}
+
+function harEntryToRequestShim(entry) {
+  const url = entry.request && entry.request.url ? entry.request.url : '';
+  const method = (entry.request && entry.request.method ? entry.request.method : 'GET').toUpperCase();
+
+  const headers = (entry.request && Array.isArray(entry.request.headers)) ? entry.request.headers : [];
+
+  const responseStatus = entry.response && typeof entry.response.status === 'number' ? entry.response.status : 200;
+  const bodySize = entry.response && typeof entry.response.bodySize === 'number' ? entry.response.bodySize : 0;
+
+  // HAR has queryString separately sometimes; DevTools heuristics uses request.queryString array.
+  const queryString = [];
+  if (entry.request && Array.isArray(entry.request.queryString)) {
+    entry.request.queryString.forEach(q => {
+      if (q && typeof q.name === 'string') queryString.push({ name: q.name, value: q.value });
+    });
+  }
+
+  // HAR postData
+  let postData = null;
+  if (entry.request && entry.request.postData && entry.request.postData.text) {
+    postData = { text: entry.request.postData.text };
+  }
+
+  // Minimal startedDateTime iso
+  const startedDateTime = entry.startedDateTime || new Date().toISOString();
+
+  // Duration from HAR entry (ms)
+  const time = typeof entry.timings && typeof entry.timings.wait === 'number'
+    ? entry.timings.wait
+    : (typeof entry.time === 'number' ? entry.time : 50);
+
+  return {
+    request: {
+      method,
+      url,
+      headers,
+      queryString,
+      postData
+    },
+    response: {
+      status: responseStatus,
+      headers: (entry.response && Array.isArray(entry.response.headers)) ? entry.response.headers : [],
+      bodySize,
+      content: null
+    },
+    time,
+    startedDateTime,
+    _graphql: null
+  };
+}
+
+function renderAtomicityDashboard(flows) {
+  const metricAtomicity = document.getElementById('metric-atomicity-score');
+  const metricTotalFlows = document.getElementById('metric-total-flows');
+  const metricNonAtomic = document.getElementById('metric-non-atomic');
+  const metricViolations = document.getElementById('metric-violations');
+  const patternsList = document.getElementById('dashboard-patterns-list');
+  const recTbody = document.getElementById('recommendations-tbody');
+
+  if (!metricAtomicity || !metricTotalFlows || !metricNonAtomic || !metricViolations || !patternsList || !recTbody) {
+    console.warn('[Workflow Detector] Atomicity dashboard containers missing; cannot render dashboard.');
+    return;
+  }
+
+  const totalFlows = flows.length;
+  let atomicCount = 0;
+  let nonAtomic = 0;
+  let violations = 0;
+
+  const patternCounts = {};
+
+  // Count findings by heuristic id
+  flows.forEach(f => {
+    const isAtomic = f.requests.length === 1;
+    if (isAtomic) atomicCount++;
+    else nonAtomic++;
+
+    const heur = f.heuristics || [];
+    if (heur.length > 0) violations++;
+
+    heur.forEach(h => {
+      patternCounts[h.id] = (patternCounts[h.id] || 0) + 1;
+    });
+  });
+
+  const atomicityScore = totalFlows > 0 ? Math.round((atomicCount / totalFlows) * 100) : 0;
+
+  metricAtomicity.textContent = `${atomicityScore}%`;
+  metricTotalFlows.textContent = `${totalFlows}`;
+  metricNonAtomic.textContent = `${nonAtomic}`;
+  metricViolations.textContent = `${violations}`;
+
+  // Render pattern prevalence
+  const patterns = Object.entries(patternCounts).sort((a, b) => b[1] - a[1]).slice(0, 6);
+  patternsList.innerHTML = '';
+
+  if (!patterns.length) {
+    patternsList.innerHTML = `
+      <div style="text-align:center;color:var(--text-muted);font-size:12px;padding:12px;">No orchestration patterns detected in uploaded endpoints.</div>
+    `;
+  } else {
+    patterns.forEach(([pid, count]) => {
+      const pct = totalFlows ? Math.round((count / totalFlows) * 100) : 0;
+      patternsList.innerHTML += `
+        <div class="chart-row" style="margin: 10px 0;">
+          <div class="chart-label" style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-muted);">
+            <span>${escapeHtml(pid)}</span>
+            <span>${pct}%</span>
+          </div>
+          <div class="chart-bar" style="height:10px;background:rgba(255,255,255,0.06);border-radius:999px;overflow:hidden;margin-top:6px;">
+            <div style="height:100%;width:${Math.min(100, pct)}%;background:linear-gradient(90deg,var(--color-primary),rgba(59,130,246,0.6));"></div>
+          </div>
+        </div>
+      `;
+    });
+  }
+
+  // Recommendations: show non-atomic flows sorted by score descending
+  const nonAtomicFlows = flows.filter(f => f.requests.length > 1).sort((a, b) => (b.score || 0) - (a.score || 0));
+  recTbody.innerHTML = '';
+
+  if (!nonAtomicFlows.length) {
+    recTbody.innerHTML = `
+      <tr>
+        <td colspan="3" style="text-align:center;color:var(--text-muted);font-size:12px;">All flows look atomic (single request).</td>
+      </tr>
+    `;
+    return;
+  }
+
+  nonAtomicFlows.slice(0, 10).forEach(f => {
+    const endpointsSeq = f.requests.map(r => {
+      const label = r._graphql ? `GQL(${r._graphql.operations?.[0]?.operationName || 'anonymous'})` : `${(r.request.method || 'GET')} ${getPathname(r.request.url || '')}`;
+      return label;
+    }).join('  →  ');
+
+    const patterns = (f.heuristics || []).map(h => h.name).join(', ') || 'No heuristic findings';
+
+    const recommendation = suggestConsolidationRecommendation(f);
+
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td title="${escapeHtml(endpointsSeq)}">${escapeHtml(truncate(endpointsSeq, 120))}</td>
+      <td>${escapeHtml(truncate(patterns, 90))}</td>
+      <td>${escapeHtml(recommendation)}</td>
+    `;
+    recTbody.appendChild(tr);
+  });
+}
+
+function suggestConsolidationRecommendation(flow) {
+  const heur = flow.heuristics || [];
+  const hasCheckAct = heur.some(h => h.id === 'check-act');
+  const hasPolling = heur.some(h => h.id === 'polling');
+  const hasFanout = heur.some(h => h.id === 'fanout');
+  const hasGraphMut = heur.some(h => h.id === 'graphql-mutations');
+
+  if (hasCheckAct) {
+    return 'Consolidate guard-check + mutation into a single backend endpoint that enforces authorization/validation server-side, returning the final state in one round trip.';
+  }
+  if (hasPolling) {
+    return 'Replace staged polling with an async job pattern that returns a final state/callback, or provide a single endpoint that returns readiness immediately.';
+  }
+  if (hasGraphMut) {
+    return 'Batch GraphQL mutations server-side (single mutation/request) to avoid multi-write orchestration from the client.';
+  }
+  if (hasFanout) {
+    return 'Where possible, collapse fan-out reads/writes into a composed endpoint (server-side aggregation) to reduce request cascades.';
+  }
+  return 'Consider consolidating the endpoint sequence into a single atomic backend operation to reduce orchestration and failure modes.';
+}
+
+function truncate(str, n) {
+  if (!str) return '';
+  return str.length > n ? str.slice(0, n - 1) + '…' : str;
+}
+
 
 
 // HTML Escaping Utility
