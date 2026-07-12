@@ -341,6 +341,11 @@ function runHeuristics(workflow) {
   // For each mutating request (POST/PUT/PATCH/DELETE or GraphQL mutation), find the nearest preceding
   // check-like request (GET with keywords or GraphQL query with check keywords) that completes before/near it.
 
+  // NOTE (Concurrency): When multiple multi-step flows run concurrently against the same mutation/guard pattern,
+  // we can see overlapping mutations with similar paths and very short inter-mutation gaps.
+  // We add a dedicated heuristic to flag these cases as potential racey concurrency anomalies.
+
+
   const isMutatingRequest = (req) => {
     return ['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.request.method) ||
       (req._graphql && req._graphql.operations && req._graphql.operations.some(op => op.type === 'mutation'));
@@ -459,8 +464,47 @@ function runHeuristics(workflow) {
     score += findingScore;
   }
 
+  // 2.5) Racey concurrent mutations on similar guard patterns
+  // Detect overlapping/near-concurrent mutations that share similar pathname prefixes (or identical paths)
+  // and occur with very short start-to-start gaps. This helps flag when concurrent multi-step flows
+  // target the same mutation endpoints.
+  const mutatingReqsSorted = [...sortedReqs].filter(isMutatingRequest);
+  if (mutatingReqsSorted.length >= 2) {
+    // bucket by normalized pathname (without query) to avoid counting unrelated endpoints
+    const pathKey = (req) => {
+      const p = getPathname(req.request.url).toLowerCase();
+      // treat first 3 segments as a coarse grouping key
+      const segs = p.split('/').filter(Boolean);
+      return segs.slice(0, 3).join('/') || p;
+    };
+
+    let raceyPairs = 0;
+    for (let k = 1; k < mutatingReqsSorted.length; k++) {
+      const prev = mutatingReqsSorted[k - 1];
+      const curr = mutatingReqsSorted[k];
+      const gap = new Date(curr.startedDateTime).getTime() - new Date(prev.startedDateTime).getTime();
+      if (gap >= 0 && gap < 120) {
+        if (pathKey(prev) === pathKey(curr)) raceyPairs++;
+      }
+    }
+
+    if (raceyPairs > 0) {
+      const severity = raceyPairs >= 3 ? 'high' : 'medium';
+      const findingScore = severity === 'high' ? 55 : 35;
+      findings.push({
+        id: 'racey-concurrent-mutations',
+        name: 'Racey Concurrent Mutations (Same Mutation Surface)',
+        description: `Detected ${raceyPairs} near-concurrent mutation requests (start-gap < 120ms) targeting the same mutation path group, suggesting racey concurrent multi-step flows.`,
+        severity,
+        score: findingScore
+      });
+      score += findingScore;
+    }
+  }
+
   // 3) Cross-Domain/Service Orchestration
   const uniqueHosts = [...new Set(workflow.requests.map(r => getHostname(r.request.url)).filter(Boolean))];
+
   if (uniqueHosts.length > 1) {
     const severity = uniqueHosts.length > 2 ? 'medium' : 'low';
     const findingScore = severity === 'medium' ? 20 : 10;
