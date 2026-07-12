@@ -338,8 +338,8 @@ function runHeuristics(workflow) {
   }
 
   // 2) Check-then-act sequence
-  // Find a GET (read/check) followed by a mutating request (POST, PUT, DELETE or GraphQL mutation)
-  // where the mutation starts AFTER the GET is fully completed.
+  // Find a GET (read/check) followed by a mutating request (POST, PUT, PATCH, DELETE or GraphQL mutation)
+  // where the mutation starts AFTER the GET is fully completed (with a small timing tolerance).
   let checkThenActDetected = false;
   let checkReq = null;
   let actReq = null;
@@ -360,14 +360,17 @@ function runHeuristics(workflow) {
       // Look for a subsequent mutating action that started after A completed
       for (let j = i + 1; j < sortedReqs.length; j++) {
         const reqB = sortedReqs[j];
-        const isMutating = ['POST', 'PUT', 'DELETE'].includes(reqB.request.method) || (reqB._graphql && reqB._graphql.operations.some(op => op.type === 'mutation'));
+        const isMutating = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(reqB.request.method) || (reqB._graphql && reqB._graphql.operations.some(op => op.type === 'mutation'));
         
         // Skip if same query (not a mutation)
         if (reqB.request.method === 'GET') continue;
 
         const bStart = new Date(reqB.startedDateTime).getTime();
         
-        if (isMutating && bStart >= aEnd) {
+        // Allow a small negative/positive skew because request timing can overlap.
+        // Tunable tolerance: 100ms.
+        const checkThenActToleranceMs = 100;
+        if (isMutating && bStart >= aEnd - checkThenActToleranceMs) {
           checkThenActDetected = true;
           checkReq = reqA;
           actReq = reqB;
