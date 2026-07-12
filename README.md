@@ -65,6 +65,17 @@ scythe/
 
 ## How to use it on real websites (multi-step detection)
 
+## Current project status
+This repo is currently set up as a Chrome DevTools extension with a built-in “Test Bench” and a live heuristics engine.
+
+### Implemented capabilities (latest)
+- Multi-step workflow heuristics (fan-out, check-then-act, polling, pagination/counters, multi-mutation, telemetry).
+- GraphQL request body parsing (operation type/name/variables).
+- **Concurrency anomaly detection**: the detector now flags *racey concurrent mutations* when overlapping mutation requests (start-gap < 120ms) target the same mutation-path group, which is useful for identifying multi-step flows that collide under concurrent execution.
+- Test Bench scenario: **Concurrent Check-Then-Act** simulates multiple guarded flows running in parallel to exercise the concurrency heuristic.
+
+
+
 ### 1) Enable the detector
 1. Load the extension in Chrome (`chrome://extensions/` → **Load unpacked**).
 2. Open DevTools for the website you want to inspect.
