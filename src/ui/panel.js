@@ -337,54 +337,112 @@ function runHeuristics(workflow) {
     score += findingScore;
   }
 
-  // 2) Check-then-act sequence
-  // Find a GET (read/check) followed by a mutating request (POST, PUT, PATCH, DELETE or GraphQL mutation)
-  // where the mutation starts AFTER the GET is fully completed (with a small timing tolerance).
+  // 2) Atomicity checks anchored on mutating endpoints
+  // For each mutating request (POST/PUT/PATCH/DELETE or GraphQL mutation), find the nearest preceding
+  // check-like request (GET with keywords or GraphQL query with check keywords) that completes before/near it.
+
+  const isMutatingRequest = (req) => {
+    return ['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.request.method) ||
+      (req._graphql && req._graphql.operations && req._graphql.operations.some(op => op.type === 'mutation'));
+  };
+
+  const isGraphQLCheckKeyword = (req) => {
+    if (!req._graphql || !req._graphql.operations) return false;
+    return req._graphql.operations.some(op =>
+      /check|validate|verify|auth|perm|exist|status|search|lookup/i.test(op.operationName)
+    );
+  };
+
+  const isCheckLikeRequest = (req) => {
+    const isGetOrGqlQuery =
+      req.request.method === 'GET' ||
+      (req._graphql && req._graphql.operations && req._graphql.operations.some(op => op.type === 'query'));
+
+    const path = getPathname(req.request.url).toLowerCase();
+    const isCheckKeyword = /check|validate|verify|auth|perm|exist|status|search|lookup/.test(path) || isGraphQLCheckKeyword(req);
+
+    return isGetOrGqlQuery && isCheckKeyword;
+  };
+
+  // Keep the original workflow-level check-then-act detection behavior, but also anchor
+  // findings to individual mutating endpoints.
   let checkThenActDetected = false;
   let checkReq = null;
   let actReq = null;
 
-  for (let i = 0; i < sortedReqs.length; i++) {
-    const reqA = sortedReqs[i];
-    const isGet = reqA.request.method === 'GET' || (reqA._graphql && reqA._graphql.operations.some(op => op.type === 'query'));
-    
-    // Check keywords in path
-    const pathA = getPathname(reqA.request.url).toLowerCase();
-    const isCheckKeyword = /check|validate|verify|auth|perm|exist|status|search|lookup/.test(pathA) ||
-                           (reqA._graphql && reqA._graphql.operations.some(op => /check|validate|verify|auth|perm|exist|status|search|lookup/i.test(op.operationName)));
-    
-    if (isGet && isCheckKeyword) {
+  // Per-mutation anchored findings
+  const anchoredCheckActFindings = [];
+  const checkThenActToleranceMs = 100;
+
+  for (let j = 0; j < sortedReqs.length; j++) {
+    const reqB = sortedReqs[j];
+    if (!isMutatingRequest(reqB)) continue;
+
+    // Search backwards for the closest preceding check-like request.
+    // We require that the mutation starts after the check request completes (with tolerance).
+    let closestCheck = null;
+
+    for (let i = j - 1; i >= 0; i--) {
+      const reqA = sortedReqs[i];
+      if (reqA.type === 'unassociated') continue;
+      if (!isCheckLikeRequest(reqA)) continue;
+
       const aStart = new Date(reqA.startedDateTime).getTime();
       const aEnd = aStart + (reqA.time || 0);
+      const bStart = new Date(reqB.startedDateTime).getTime();
 
-      // Look for a subsequent mutating action that started after A completed
-      for (let j = i + 1; j < sortedReqs.length; j++) {
-        const reqB = sortedReqs[j];
-        const isMutating = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(reqB.request.method) || (reqB._graphql && reqB._graphql.operations.some(op => op.type === 'mutation'));
-        
-        // Skip if same query (not a mutation)
-        if (reqB.request.method === 'GET') continue;
-
-        const bStart = new Date(reqB.startedDateTime).getTime();
-        
-        // Allow a small negative/positive skew because request timing can overlap.
-        // Tunable tolerance: 100ms.
-        const checkThenActToleranceMs = 100;
-        if (isMutating && bStart >= aEnd - checkThenActToleranceMs) {
-          checkThenActDetected = true;
-          checkReq = reqA;
-          actReq = reqB;
-          break;
-        }
+      if (bStart >= aEnd - checkThenActToleranceMs) {
+        closestCheck = reqA;
+        break; // nearest preceding qualifying check
       }
     }
-    if (checkThenActDetected) break;
+
+    if (!closestCheck) continue;
+
+    // Determine severity anchored to this mutating endpoint
+    const isPaymentOrCritical = /pay|checkout|buy|purchase|submit|delete/i.test(reqB.request.url) ||
+      (reqB._graphql && reqB._graphql.operations && reqB._graphql.operations.some(op => /pay|checkout|buy|purchase|submit|delete/i.test(op.operationName)));
+
+    const severity = isPaymentOrCritical ? 'high' : 'medium';
+    const findingScore = severity === 'high' ? 45 : 30;
+
+    const checkLabel = closestCheck._graphql
+      ? `GraphQL: ${closestCheck._graphql.operations[0].operationName}`
+      : getPathname(closestCheck.request.url);
+
+    const actLabel = reqB._graphql
+      ? `GraphQL: ${reqB._graphql.operations[0].operationName}`
+      : `${reqB.request.method} ${getPathname(reqB.request.url)}`;
+
+    anchoredCheckActFindings.push({
+      id: 'check-act',
+      name: 'Check-then-act Pattern (Anchored to Mutating Endpoint)',
+      description: `Potential guard check: \`${checkLabel}\` completed, then mutating \`${actLabel}\` executed.`,
+      severity,
+      score: findingScore
+    });
+
+    // Maintain legacy single-finding behavior for overall workflow summary
+    if (!checkThenActDetected) {
+      checkThenActDetected = true;
+      checkReq = closestCheck;
+      actReq = reqB;
+    }
   }
 
-  if (checkThenActDetected) {
-    const isPaymentOrCritical = /pay|checkout|buy|purchase|submit|delete/i.test(actReq.request.url) || 
-                                (actReq._graphql && actReq._graphql.operations.some(op => /pay|checkout|buy|purchase|submit|delete/i.test(op.operationName)));
-    
+  // Add per-mutation findings (can be multiple)
+  if (anchoredCheckActFindings.length) {
+    anchoredCheckActFindings.forEach(f => {
+      findings.push(f);
+      score += f.score;
+    });
+  }
+
+  // Keep legacy single finding too, but avoid double counting if we already added anchored findings
+  if (checkThenActDetected && anchoredCheckActFindings.length === 0) {
+    const isPaymentOrCritical = /pay|checkout|buy|purchase|submit|delete/i.test(actReq.request.url) ||
+      (actReq._graphql && actReq._graphql.operations.some(op => /pay|checkout|buy|purchase|submit|delete/i.test(op.operationName)));
+
     const severity = isPaymentOrCritical ? 'high' : 'medium';
     const findingScore = severity === 'high' ? 45 : 30;
 
