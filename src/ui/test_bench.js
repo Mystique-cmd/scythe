@@ -63,6 +63,45 @@ function setupClickListeners() {
     logToConsole('Scenario 1 finished.', 'success');
   });
 
+  // Scenario 1.5: Concurrent Check-Then-Act (mutation concurrency simulation)
+  document.getElementById('btn-concurrent-checkact').addEventListener('click', async () => {
+    logToConsole('--- SCENARIO: Concurrent Check-Then-Act (Racey Mutation Concurrency) ---', 'info');
+
+    const concurrency = 3; // keep deterministic and reasonably fast
+
+    const oneGuardedFlow = async (flowIndex) => {
+      // Step A: GET verification (fixture)
+      await safeFetch(
+        `mock_responses/check_permissions.json?action=validate_permissions&flow=${flowIndex}`,
+        {},
+        `flow-${flowIndex} GET check_permissions`
+      );
+
+      // jitter inside the flow to encourage interleaving across concurrent flows
+      await new Promise(resolve => setTimeout(resolve, 100 + flowIndex * 35));
+
+      // Step B: Mutating POST (fixture-based simulated endpoint)
+      await safeFetch(
+        `mock_responses/check_permissions.json?fallback=post_action&flow=${flowIndex}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'checkout_buy', user: `user_dev_881_flow_${flowIndex}` })
+        },
+        `flow-${flowIndex} POST checkout_buy (fixture)`
+      );
+    };
+
+    // Run multiple guarded flows concurrently
+    const all = [];
+    for (let i = 0; i < concurrency; i++) {
+      all.push(oneGuardedFlow(i));
+    }
+
+    await Promise.all(all);
+    logToConsole('Scenario 1.5 finished.', 'success');
+  });
+
   // Scenario 2: Check-Then-Act
   document.getElementById('btn-checkact').addEventListener('click', async () => {
     logToConsole('--- SCENARIO: Check-Then-Act ---', 'info');
