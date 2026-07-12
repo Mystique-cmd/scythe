@@ -88,7 +88,16 @@ This repo is currently set up as a Chrome DevTools extension with a built-in “
 ### 3) Tell whether the site is “multi-step” (how to interpret the output)
 When the extension detects a clustered workflow, it will show it in the left sidebar.
 
+This tool is a **heuristic analyzer**: it correlates requests to user actions (sessionization) and then flags evidence-based orchestration patterns. Treat each finding as “strong evidence” rather than a guarantee.
+
+#### What the sidebar items represent
+- **Workflow item (left sidebar)**: a sessionized cluster of requests associated with a user action (click/keypress/etc.) within the **Association Window**.
+- **Unassociated traffic**: requests that don’t match any action in the time window (background jobs, browser noise, long-delayed requests).
+- **Severity pill**: derived from the heuristic findings for that workflow.
+
+#### Interpreting a workflow cluster step-by-step
 For each workflow cluster, do this:
+
 1. **Look for a severity badge** (low / medium / high).
    - **High** generally means the heuristics strongly match multi-step orchestration patterns (e.g., check-then-act around critical operations, unstable mixed-status flows, multiple GraphQL mutations).
 2. **Open the workflow details** by clicking the item in the sidebar.
