@@ -661,7 +661,7 @@ function runHeuristics(workflow) {
   // Filter based on severity threshold
   const thresholdMap = { 'low': 1, 'medium': 2, 'high': 3 };
   const minLevel = thresholdMap[settings.severityThreshold] || 2;
-  
+
   const filteredFindings = findings.filter(f => {
     const lvl = thresholdMap[f.severity] || 1;
     return lvl >= minLevel;
@@ -670,7 +670,180 @@ function runHeuristics(workflow) {
   workflow.heuristics = filteredFindings;
   workflow.severity = filteredFindings.length > 0 ? finalSeverity : 'none';
   workflow.score = score;
+
+  // Clear previous atomicity traversal results (if any)
+  delete workflow.atomicity;
 }
+
+// =========================
+// HIGH-ONLY ATOMICITY TRAVERSAL (output/produce anchored)
+// =========================
+
+function runHighOnlyAtomicityTraversal(flows) {
+  if (!Array.isArray(flows) || flows.length === 0) return;
+
+  const highFlows = flows.filter(f => f && f.severity === 'high');
+  if (!highFlows.length) return;
+
+  // For each high flow, compute atomicity anchored to the output/produce (last mutating request)
+  highFlows.forEach(flow => {
+    flow.atomicity = computeOutputAnchoredAtomicity(flow);
+  });
+}
+
+function computeOutputAnchoredAtomicity(flow) {
+  const requests = Array.isArray(flow.requests) ? flow.requests : [];
+  if (requests.length <= 1) {
+    return {
+      isAtomic: true,
+      anchoredOutput: null,
+      violations: [],
+      reasons: []
+    };
+  }
+
+  const sortedReqs = [...requests].sort((a, b) => {
+    return new Date(a.startedDateTime).getTime() - new Date(b.startedDateTime).getTime();
+  });
+
+  const isMutatingRequest = (req) => {
+    return ['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.request.method) ||
+      (req._graphql && req._graphql.operations && req._graphql.operations.some(op => op.type === 'mutation'));
+  };
+
+  const isCheckLikeRequest = (req) => {
+    const isGetOrGqlQuery =
+      req.request.method === 'GET' ||
+      (req._graphql && req._graphql.operations && req._graphql.operations.some(op => op.type === 'query'));
+
+    const path = getPathname(req.request.url).toLowerCase();
+    const isPathCheckKeyword = /check|validate|verify|auth|perm|exist|status|search|lookup/.test(path);
+
+    const isGraphQLCheckKeyword = !!(req._graphql && req._graphql.operations && req._graphql.operations.some(op =>
+      /check|validate|verify|auth|perm|exist|status|search|lookup/i.test(op.operationName)
+    ));
+
+    return isGetOrGqlQuery && (isPathCheckKeyword || isGraphQLCheckKeyword);
+  };
+
+  // Output/produce = last mutating request in the cluster
+  let outputReq = null;
+  for (let i = sortedReqs.length - 1; i >= 0; i--) {
+    if (isMutatingRequest(sortedReqs[i])) {
+      outputReq = sortedReqs[i];
+      break;
+    }
+  }
+
+  if (!outputReq) {
+    // No mutating request => treat as atomic-ish
+    return {
+      isAtomic: true,
+      anchoredOutput: null,
+      violations: [],
+      reasons: []
+    };
+  }
+
+  const outputIdx = sortedReqs.indexOf(outputReq);
+  const beforeOutput = sortedReqs.slice(0, outputIdx);
+
+  // Evidence buckets
+  const violations = [];
+  const reasons = [];
+
+  const outputIsPaymentOrCritical = (() => {
+    const url = outputReq.request.url || '';
+    const gqlMutName = outputReq._graphql?.operations?.[0]?.operationName || '';
+    return /pay|checkout|buy|purchase|submit|delete/i.test(url) || /pay|checkout|buy|purchase|submit|delete/i.test(gqlMutName);
+  })();
+
+  // 1) Guard check then act around output
+  // If a check-like request exists close enough before output, we flag non-atomicity.
+  // Uses time tolerance similar to existing logic (100ms) but relative to output.
+  let guardReq = null;
+  const outputStart = new Date(outputReq.startedDateTime).getTime();
+  const toleranceMs = 100;
+
+  for (let i = beforeOutput.length - 1; i >= 0; i--) {
+    const cand = beforeOutput[i];
+    if (!isCheckLikeRequest(cand)) continue;
+    const candStart = new Date(cand.startedDateTime).getTime();
+    const candEnd = candStart + ((cand.time || 0));
+    if (outputStart >= candEnd - toleranceMs) {
+      guardReq = cand;
+      break;
+    }
+  }
+
+  if (guardReq) {
+    violations.push({ id: 'output-check-act', severity: outputIsPaymentOrCritical ? 'high' : 'medium' });
+    reasons.push('Found guard/check-like request immediately before the output/produce mutating request.');
+  }
+
+  // 2) Polling/readiness loops BEFORE output
+  const pathCounts = {};
+  beforeOutput.forEach(r => {
+    const p = getPathname(r.request.url);
+    pathCounts[p] = (pathCounts[p] || 0) + 1;
+  });
+
+  const pollingPathEntry = Object.entries(pathCounts).find(
+    ([p, count]) => count >= 3 && /poll|status|job|progress|ready|wait/i.test(p)
+  );
+  const pollingPath = pollingPathEntry ? pollingPathEntry[0] : null;
+
+
+
+  if (pollingPath) {
+    violations.push({ id: 'output-polling', severity: 'medium' });
+    reasons.push(`Detected repeated readiness/polling endpoint (${pollingPath}) before the output/produce request.`);
+  }
+
+  // 3) Multi-mutation BEFORE/INCLUDING output
+  const mutatingReqs = sortedReqs.filter(isMutatingRequest);
+  if (mutatingReqs.length > 1) {
+    violations.push({ id: 'output-multiple-mutations', severity: mutatingReqs.length > 2 ? 'high' : 'medium' });
+    reasons.push(`Detected ${mutatingReqs.length} mutating requests in the same high cluster; atomicity is unlikely if output depends on earlier writes.`);
+  }
+
+  // 4) Racey concurrent mutation patterns in the cluster (already approximated by existing heuristic)
+  // Here: if there are multiple mutation reqs with very short start gaps targeting same path-group.
+  if (mutatingReqs.length >= 2) {
+    const pathKey = (req) => {
+      const p = getPathname(req.request.url).toLowerCase();
+      const segs = p.split('/').filter(Boolean);
+      return segs.slice(0, 3).join('/') || p;
+    };
+
+    let raceyPairs = 0;
+    for (let k = 1; k < mutatingReqs.length; k++) {
+      const prev = mutatingReqs[k - 1];
+      const curr = mutatingReqs[k];
+      const gap = new Date(curr.startedDateTime).getTime() - new Date(prev.startedDateTime).getTime();
+      if (gap >= 0 && gap < 120) {
+        if (pathKey(prev) === pathKey(curr)) raceyPairs++;
+      }
+    }
+
+    if (raceyPairs > 0) {
+      violations.push({ id: 'output-racey-concurrent-mutations', severity: raceyPairs >= 3 ? 'high' : 'medium' });
+      reasons.push(`Detected ${raceyPairs} near-concurrent mutation requests targeting the same mutation surface before/around the output.`);
+    }
+  }
+
+  const isAtomic = violations.length === 0;
+
+  const anchoredOutput = {
+    label: outputReq._graphql
+      ? `GQL(${outputReq._graphql.operations?.[0]?.operationName || 'anonymous'})`
+      : `${outputReq.request.method} ${getPathname(outputReq.request.url)}`,
+    timestamp: outputReq.startedDateTime
+  };
+
+  return { isAtomic, anchoredOutput, violations, reasons };
+}
+
 
 // UI RENDERING: WORKFLOW LIST
 function renderWorkflowList() {
@@ -1233,8 +1406,12 @@ async function analyzeUploadedFile(file) {
     workflows = flows;
     selectedWorkflowId = null;
 
+    // Ensure a fresh atomicity traversal ONLY for HIGH workflows
+    runHighOnlyAtomicityTraversal(flows);
+
     // Compute and render dashboard
     renderAtomicityDashboard(flows);
+
 
     // Swap UI into dashboard state
     document.getElementById('dashboard-state').style.display = 'block';
@@ -1569,11 +1746,24 @@ function renderAtomicityDashboard(flows) {
   let nonAtomic = 0;
   let violations = 0;
 
+  const highFlows = flows.filter(f => f && f.severity === 'high');
+  const atomicitiesHigh = highFlows.map(f => f.atomicity).filter(Boolean);
+  const highTotal = highFlows.length;
+  let highChecked = 0;
+  let highAtomicCount = 0;
+  let highNonAtomic = 0;
+  let highViolations = 0;
+
+
   const patternCounts = {};
 
   // Count findings by heuristic id
   flows.forEach(f => {
-    const isAtomic = f.requests.length === 1;
+    const atomicInfo = f && f.atomicity;
+    const isAtomic = atomicInfo && typeof atomicInfo.isAtomic === 'boolean'
+      ? atomicInfo.isAtomic
+      : (f.requests.length === 1);
+
     if (isAtomic) atomicCount++;
     else nonAtomic++;
 
@@ -1585,12 +1775,24 @@ function renderAtomicityDashboard(flows) {
     });
   });
 
-  const atomicityScore = totalFlows > 0 ? Math.round((atomicCount / totalFlows) * 100) : 0;
+  // HIGH-only metrics for the “atomicity update” pass
+  highFlows.forEach(f => {
+    highChecked++;
+    const a = f.atomicity;
+    if (a && a.isAtomic) highAtomicCount++;
+    else highNonAtomic++;
 
-  metricAtomicity.textContent = `${atomicityScore}%`;
+    if (a && a.violations && a.violations.length > 0) highViolations++;
+  });
+
+  const atomicityScore = totalFlows > 0 ? Math.round((atomicCount / totalFlows) * 100) : 0;
+  const highAtomicityScore = highTotal > 0 ? Math.round((highAtomicCount / highTotal) * 100) : 0;
+
+  metricAtomicity.textContent = `${highAtomicityScore}% (high)`;
   metricTotalFlows.textContent = `${totalFlows}`;
-  metricNonAtomic.textContent = `${nonAtomic}`;
-  metricViolations.textContent = `${violations}`;
+  metricNonAtomic.textContent = `${highNonAtomic}/${highTotal}`;
+  metricViolations.textContent = `${highViolations} high violations`;
+
 
   // Render pattern prevalence
   const patterns = Object.entries(patternCounts).sort((a, b) => b[1] - a[1]).slice(0, 6);
@@ -1617,8 +1819,15 @@ function renderAtomicityDashboard(flows) {
     });
   }
 
-  // Recommendations: show non-atomic flows sorted by score descending
-  const nonAtomicFlows = flows.filter(f => f.requests.length > 1).sort((a, b) => (b.score || 0) - (a.score || 0));
+  // Recommendations: show non-atomic HIGH flows (based on output-anchored atomicity traversal)
+  const nonAtomicFlows = highFlows
+    .filter(f => {
+      const a = f.atomicity;
+      if (a && typeof a.isAtomic === 'boolean') return !a.isAtomic;
+      return f.requests.length > 1;
+    })
+    .sort((a, b) => (b.score || 0) - (a.score || 0));
+
   recTbody.innerHTML = '';
 
   if (!nonAtomicFlows.length) {
