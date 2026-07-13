@@ -106,7 +106,27 @@ For each workflow cluster, do this:
 4. Use the **Network Orchestration Timeline**:
    - Bars are request spans.
    - The x-axis is the offset from the correlated user action.
-   - If you see multiple bars grouped after the same user action (especially with guard/poll/cascade patterns), it strongly indicates an orchestrated multi-step backend flow.
+   - Bars that start soon after **0s** and cluster together indicate that the client is orchestrating multiple dependent/related requests as part of one user action.
+
+   To recognize specific orchestration patterns, look at how the bars are positioned (left=when it starts, width=duration), and whether there’s repetition/sequencing:
+
+   **Poll Guard Pattern ("verify → readiness polling → act")**
+   - **What it means**: The client first performs a guard/verification step (e.g., permission/session/eligibility check). If that passes (or implies it’s allowed), the client then repeatedly checks readiness (often a status endpoint) until the system is ready, and only then performs the final act (often a mutation/POST/PUT/DELETE or a GraphQL mutation).
+   - **What you should see on the timeline**:
+     1. A **guard/check bar** near **0s** (often a GET/query labeled as something like permissions/validate/check/status).
+     2. One or more **polling bars** after the guard: repeated requests whose labels/paths look the same or very similar (e.g., `.../status`, `.../job_status`, `.../ready`) appearing at several increasing offsets.
+     3. A **final act bar** later in time, typically a mutating operation (POST/PUT/DELETE or a `mutation` GraphQL operation), starting after the polling completes (or after one of the later poll results indicates completion).
+   - **Timeline cue**: polling shows up visually as **multiple bars to the same-ish endpoint**, often with relatively regular start offsets, before the final mutating bar.
+
+   **Cascade Pattern ("fan-out / chained steps")**
+   - **What it means**: One step of the workflow triggers additional dependent requests (reads and/or writes). This can be a sequential dependency chain (step-by-step) and/or a fan-out where multiple downstream calls start in quick succession, but the ordering still forms a cascade.
+   - **What you should see on the timeline**:
+     1. A first **kick-off bar** near **0s** (often the user-intent boundary: a click/submit causes an initial request).
+     2. A **burst or chain of subsequent bars** whose start offsets increase quickly (small gaps between request starts) and that occur within the same workflow cluster.
+     3. If it’s truly dependency-like, downstream bars typically start **after** the earlier ones (no long pauses; later calls are offset to the right, forming a left-to-right progression).
+   - **Timeline cue**: a cascade looks like a **dense sequence** of bars after the same user action, with multiple distinct endpoints appearing as a coordinated “next steps” chain (often similar to rapid fan-out, but still grouped tightly by time).
+
+   If the timeline shows both sequencing **and** repetition (guard + repeated polls, or a chain + dependent fan-out), the orchestration heuristics are much more likely to be correct.
 5. Confirm with **HTTP Operations (HAR)**:
    - Click a row or timeline bar to open the **Request Details** drawer.
    - Inspect request method, endpoint/path, payload (including GraphQL body), and response code.
