@@ -5,7 +5,9 @@
   "description": "Watches network activity and flags multi-step, orchestrated workflow patterns in browser developer tools.",
   "permissions": [
     "activeTab",
-    "storage"
+    "storage",
+    "webRequest",
+    "webRequestBlocking"
   ],
   "host_permissions": [
     "<all_urls>"

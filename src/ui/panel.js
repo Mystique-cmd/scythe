@@ -87,30 +87,33 @@ function setupConnection() {
   });
 
   // Listen to user actions from the content script via background.js
-  backgroundPageConnection.onMessage.addListener((message) => {
+backgroundPageConnection.onMessage.addListener((message) => {
+    if (!message || !message.type) return;
+
     if (message.type === 'USER_ACTION') {
       handleUserAction(message.action);
+      return;
+    }
+
+    // webRequest network feed (background)
+    if (message.type === 'WEBREQUEST' && message.request) {
+      handleNetworkRequest(message.request);
+      return;
+    }
+
+    // tracked tab info (optional; current code uses only network feed)
+    if (message.type === 'TRACKED_TAB') {
+      // no-op for now
+      return;
     }
   });
 
-  // Listen to network requests from the inspected window (built-in DevTools API)
-  chrome.devtools.network.onRequestFinished.addListener((request) => {
-    handleNetworkRequest(request);
-  });
-
-  // Reset log on navigation if preserveLog is false
-  chrome.devtools.network.onNavigated.addListener((url) => {
-    console.log('[Workflow Detector] Navigated to:', url);
-    if (!settings.preserveLog) {
-      clearLogs();
-    } else {
-      // Add a navigation record to mark the flow
-      handleUserAction({
-        type: 'navigation',
-        detail: `Navigated to ${new URL(url).pathname}`,
-        timestamp: Date.now(),
-        url: url
-      });
+  // Network requests now arrive from background.js via postMessage.
+  // We intentionally do not use chrome.devtools.network.* so we can also capture requests
+  // from newly opened tabs.
+  backgroundPageConnection.onMessage.addListener((message) => {
+    if (message && message.type === 'WEBREQUEST' && message.request) {
+      handleNetworkRequest(message.request);
     }
   });
 }

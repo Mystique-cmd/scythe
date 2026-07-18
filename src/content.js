@@ -52,6 +52,35 @@ function notifyUserAction(type, detail) {
   }
 }
 
+function notifyNewTabIntent({ href, sourceUrl }) {
+  // Best-effort: we only use href to correlate the newly created tab URL.
+  // If href is missing we do nothing.
+  if (!href) return;
+
+  let destUrl = href;
+  try {
+    destUrl = new URL(href, window.location.href).toString();
+  } catch (_) {
+    // keep original href
+  }
+
+  const message = {
+    type: 'NEW_TAB_INTENT',
+    intent: {
+      href: href,
+      destUrl,
+      sourceUrl,
+      timestamp: Date.now()
+    }
+  };
+
+  try {
+    chrome.runtime.sendMessage(message);
+  } catch (e) {
+    // Ignore context invalidated errors when extension is reloaded
+  }
+}
+
 // 1. Listen for clicks
 document.addEventListener('click', (event) => {
   // We want to capture clicks on buttons, inputs, links, or elements with click handlers or cursor pointer
@@ -78,6 +107,26 @@ document.addEventListener('click', (event) => {
   // If we found an interactive element or if it's a direct target, report it
   const finalElement = interactive || event.target;
   const elementDesc = getElementIdentifier(finalElement);
+
+  // Detect links intended for a new tab/window
+  try {
+    const anchor = finalElement && finalElement.closest ? finalElement.closest('a') : null;
+    if (anchor && anchor.href) {
+      const target = (anchor.getAttribute('target') || '').toLowerCase();
+      const openInNewTab = target === '_blank';
+      const openInNewWindow = target === '_window';
+
+      // Also treat modifier clicks as new-tab intent (browser UI dependent)
+      const modifierNewTab = event.ctrlKey || event.metaKey || event.button === 1;
+
+      if ((openInNewTab || openInNewWindow || modifierNewTab) && !event.defaultPrevented) {
+        notifyNewTabIntent({ href: anchor.href, sourceUrl: window.location.href });
+      }
+    }
+  } catch (_) {
+    // ignore
+  }
+
   notifyUserAction('click', `Clicked on ${elementDesc}`);
 }, true);
 
@@ -124,5 +173,17 @@ window.addEventListener('popstate', () => {
 window.addEventListener('hashchange', () => {
   notifyUserAction('navigation', `Navigated (hashchange) to ${window.location.hash}`);
 });
+
+// Intercept window.open for better new-tab correlation
+const originalWindowOpen = window.open;
+window.open = function (...args) {
+  try {
+    const url = args[0];
+    if (typeof url === 'string' && url) {
+      notifyNewTabIntent({ href: url, sourceUrl: window.location.href });
+    }
+  } catch (_) {}
+  return originalWindowOpen.apply(this, args);
+};
 
 console.log('[Workflow Detector] Content script initialized.');
