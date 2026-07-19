@@ -150,7 +150,7 @@ chrome.webRequest.onBeforeRequest.addListener(
     });
   },
   { urls: ['<all_urls>'] },
-  ['requestHeaders']
+  ['extraHeaders']
 );
 
 // Capture request end (success)
