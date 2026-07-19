@@ -88,21 +88,31 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   }
 });
 
-// Receive messages from content script and redirect to the appropriate DevTools panel
+// Receive messages from content script
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // Messages from content scripts should have sender.tab
   if (sender.tab) {
     const tabId = sender.tab.id;
+
+    // If the devtools panel for this exact tab is connected, route to it.
     if (tabId in connections) {
       connections[tabId].postMessage(message);
-    } else {
-      console.log(`[Workflow Detector] Received event from tab ${tabId}, but no DevTools panel is connected.`);
+      return true;
     }
-  } else {
-    console.log('[Workflow Detector] Received message without sender tab:', message);
+
+    // Minimal fix: when workflows happen in newly opened tabs,
+    // there may not be a connected devtools panel for that tab.
+    // Broadcast so the currently-open panel can still sessionize based on timestamps.
+    sendToPanel(message);
+
+    console.log(`[Workflow Detector] Received event from tab ${tabId}, no panel for that tab; broadcasted to existing panel(s).`);
+    return true;
   }
+
+  console.log('[Workflow Detector] Received message without sender tab:', message);
   return true;
 });
+
 
 // =========================
 // Background network capture (webRequest) for tracked tabs
