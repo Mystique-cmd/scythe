@@ -239,6 +239,102 @@
         </div>
         <button id="btn-polling" class="btn btn-primary">Trigger Polling Task</button>
       </div>
+
+      <!-- ======================= -->
+      <!-- LOGIC FLAW SCENARIOS    -->
+      <!-- ======================= -->
+
+      <div style="grid-column: 1 / -1; margin-top: 20px; padding: 12px 0; border-bottom: 1px solid rgba(239,68,68,0.2);">
+        <h3 style="font-size: 14px; font-weight: 700; color: #f87171; display: flex; align-items: center; gap: 8px;">
+          <span>🛡️</span> Logic Flaw Detection Scenarios
+        </h3>
+        <p style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">Click to simulate vulnerable request patterns. Open the DevTools panel and view the <strong>Logic Flaws</strong> tab to see findings.</p>
+      </div>
+
+      <!-- Flaw Scenario 1: IDOR -->
+      <div class="scenario-card" style="border-color: rgba(239,68,68,0.15);">
+        <div>
+          <div class="scenario-title">
+            🔑 IDOR — Sequential Object IDs
+            <span class="scenario-badge badge-high">High</span>
+          </div>
+          <p class="scenario-desc">Simulates sequential user ID references in API paths (e.g. /api/users/1001, /api/users/1002) which enables enumeration of other users' data.</p>
+        </div>
+        <button id="btn-flaw-idor" class="btn btn-primary" style="background:#dc2626;">Trigger IDOR Pattern</button>
+      </div>
+
+      <!-- Flaw Scenario 2: Parameter Tampering -->
+      <div class="scenario-card" style="border-color: rgba(245,158,11,0.15);">
+        <div>
+          <div class="scenario-title">
+            💰 Parameter Tampering — Price Manipulation
+            <span class="scenario-badge badge-high">High</span>
+          </div>
+          <p class="scenario-desc">Simulates a checkout attempt with a negative price value and a quantity of zero, exercising price/quantity manipulation detection.</p>
+        </div>
+        <button id="btn-flaw-param-tamper" class="btn btn-primary" style="background:#d97706;">Trigger Price Tamper</button>
+      </div>
+
+      <!-- Flaw Scenario 3: Auth Privilege Escalation -->
+      <div class="scenario-card" style="border-color: rgba(168,85,247,0.15);">
+        <div>
+          <div class="scenario-title">
+            🛂 Privilege Escalation — Client Role Control
+            <span class="scenario-badge badge-high">High</span>
+          </div>
+          <p class="scenario-desc">Simulates a registration/update request where the client supplies an isAdmin=true or role=admin parameter, which should be server-controlled.</p>
+        </div>
+        <button id="btn-flaw-auth" class="btn btn-primary" style="background:#7c3aed;">Trigger Role Escalation</button>
+      </div>
+
+      <!-- Flaw Scenario 4: Mass Assignment -->
+      <div class="scenario-card" style="border-color: rgba(59,130,246,0.15);">
+        <div>
+          <div class="scenario-title">
+            📦 Mass Assignment — Protected Fields
+            <span class="scenario-badge badge-high">High</span>
+          </div>
+          <p class="scenario-desc">Simulates a profile update that sends internal fields like isVerified, balance, and role as part of the request body.</p>
+        </div>
+        <button id="btn-flaw-mass-assign" class="btn btn-primary" style="background:#2563eb;">Trigger Mass Assignment</button>
+      </div>
+
+      <!-- Flaw Scenario 5: Business Process Bypass -->
+      <div class="scenario-card" style="border-color: rgba(249,115,22,0.15);">
+        <div>
+          <div class="scenario-title">
+            🔄 Process Bypass — Payment Without Cart
+            <span class="scenario-badge badge-high">High</span>
+          </div>
+          <p class="scenario-desc">Simulates a direct payment operation without a preceding cart/checkout step, bypassing the standard purchase workflow.</p>
+        </div>
+        <button id="btn-flaw-process-bypass" class="btn btn-primary" style="background:#ea580c;">Trigger Process Bypass</button>
+      </div>
+
+      <!-- Flaw Scenario 6: Injection -->
+      <div class="scenario-card" style="border-color: rgba(236,72,153,0.15);">
+        <div>
+          <div class="scenario-title">
+            📝 Injection — SQL & NoSQL Patterns
+            <span class="scenario-badge badge-high">High</span>
+          </div>
+          <p class="scenario-desc">Simulates a login request with SQL injection pattern in email field and NoSQL operator in password field.</p>
+        </div>
+        <button id="btn-flaw-injection" class="btn btn-primary" style="background:#db2777;">Trigger Injection Patterns</button>
+      </div>
+
+      <!-- Flaw Scenario 7: Race Condition TOCTOU -->
+      <div class="scenario-card" style="border-color: rgba(16,185,129,0.15);">
+        <div>
+          <div class="scenario-title">
+            🏎️ Race Condition — Wide TOCTOU Window
+            <span class="scenario-badge badge-medium">Medium</span>
+          </div>
+          <p class="scenario-desc">Simulates a check (GET /api/check-balance) followed by a mutation (POST /api/withdraw) with a 600ms gap, creating a large race window.</p>
+        </div>
+        <button id="btn-flaw-race" class="btn btn-primary" style="background:#059669;">Trigger Race Condition</button>
+      </div>
+
     </div>
 
     <div class="console-section">

@@ -1,0 +1,417 @@
+/* ==========================================
+   Logic Flaws Detection Module Styles
+   ========================================== */
+
+/* Flaws Tab in sidebar — top-level filter tabs */
+.flaws-tab-bar {
+  display: flex;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-sidebar);
+}
+
+.flaws-tab-btn {
+  flex: 1;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-muted);
+  padding: 8px 6px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-family: var(--font-sans);
+  position: relative;
+}
+
+.flaws-tab-btn:hover {
+  color: var(--text-main);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.flaws-tab-btn.active {
+  color: var(--color-danger);
+  border-bottom-color: var(--color-danger);
+}
+
+.flaws-tab-btn .tab-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-danger-glow);
+  color: var(--color-danger);
+  font-size: 9px;
+  font-weight: 700;
+  padding: 0 5px;
+  height: 16px;
+  min-width: 16px;
+  border-radius: 8px;
+  margin-left: 4px;
+  border: 1px solid rgba(239, 68, 68, 0.2);
+}
+
+/* Flaw Severity Badge */
+.flaw-severity-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: 4px;
+  letter-spacing: 0.03em;
+}
+
+.flaw-severity-critical {
+  background: rgba(127, 29, 29, 0.3);
+  color: #fca5a5;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.flaw-severity-high {
+  background: var(--color-danger-glow);
+  color: var(--color-danger);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+}
+
+.flaw-severity-medium {
+  background: var(--color-warning-glow);
+  color: var(--color-warning);
+  border: 1px solid rgba(245, 158, 11, 0.2);
+}
+
+.flaw-severity-low {
+  background: var(--color-info-glow);
+  color: var(--color-info);
+  border: 1px solid rgba(59, 130, 246, 0.2);
+}
+
+/* Flaw category icon colors */
+.flaw-category-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  font-size: 11px;
+}
+
+.flaw-cat-idor { background: rgba(239, 68, 68, 0.12); color: #f87171; }
+.flaw-cat-param-tampering { background: rgba(245, 158, 11, 0.12); color: #fbbf24; }
+.flaw-cat-auth-escalation { background: rgba(168, 85, 247, 0.12); color: #c084fc; }
+.flaw-cat-mass-assignment { background: rgba(59, 130, 246, 0.12); color: #60a5fa; }
+.flaw-cat-process-bypass { background: rgba(249, 115, 22, 0.12); color: #fb923c; }
+.flaw-cat-input-validation { background: rgba(236, 72, 153, 0.12); color: #f472b6; }
+.flaw-cat-race-condition { background: rgba(16, 185, 129, 0.12); color: #34d399; }
+
+/* Flaw Card — displayed in details pane */
+.flaw-card {
+  display: flex;
+  gap: 10px;
+  background: rgba(239, 68, 68, 0.03);
+  border: 1px solid rgba(239, 68, 68, 0.12);
+  padding: 12px 14px;
+  border-radius: 8px;
+  align-items: flex-start;
+  animation: flawFadeIn 0.3s ease;
+  margin-bottom: 8px;
+}
+
+.flaw-card.severity-high {
+  background: rgba(239, 68, 68, 0.04);
+  border-color: rgba(239, 68, 68, 0.15);
+}
+
+.flaw-card.severity-medium {
+  background: rgba(245, 158, 11, 0.04);
+  border-color: rgba(245, 158, 11, 0.15);
+}
+
+.flaw-card.severity-low {
+  background: rgba(59, 130, 246, 0.04);
+  border-color: rgba(59, 130, 246, 0.15);
+}
+
+.flaw-card-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  flex-shrink: 0;
+  font-size: 14px;
+}
+
+.flaw-card-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.flaw-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.flaw-card-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.flaw-card-category {
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-muted);
+}
+
+.flaw-card-description {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.45;
+  margin-bottom: 8px;
+}
+
+.flaw-card-evidence {
+  background: rgba(0, 0, 0, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  border-radius: 4px;
+  padding: 8px 10px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: #a7f3d0;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  line-height: 1.4;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+/* Flaws aggregated summary widget */
+.flaws-summary-bar {
+  display: flex;
+  gap: 8px;
+  padding: 8px 12px;
+  background: rgba(239, 68, 68, 0.03);
+  border: 1px solid rgba(239, 68, 68, 0.1);
+  border-radius: 6px;
+  margin-bottom: 12px;
+  align-items: center;
+}
+
+.flaws-summary-icon {
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.flaws-summary-text {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.flaws-summary-count {
+  font-weight: 700;
+  color: var(--color-danger);
+}
+
+/* Flaws Dashboard Panel (in details pane header area) */
+.flaws-dashboard-section {
+  background: rgba(239, 68, 68, 0.02);
+  border: 1px solid rgba(239, 68, 68, 0.08);
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin-top: 4px;
+  margin-bottom: 12px;
+}
+
+.flaws-dashboard-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.flaws-dashboard-title {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-danger);
+}
+
+.flaws-dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 8px;
+}
+
+.flaws-dashboard-metric {
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 6px;
+  padding: 10px;
+  text-align: center;
+}
+
+.flaws-dashboard-metric-val {
+  font-size: 20px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.flaws-dashboard-metric-val.critical { color: #fca5a5; }
+.flaws-dashboard-metric-val.high { color: var(--color-danger); }
+.flaws-dashboard-metric-val.medium { color: var(--color-warning); }
+.flaws-dashboard-metric-val.low { color: var(--color-info); }
+
+.flaws-dashboard-metric-lbl {
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+/* Flaw list in flaws tab */
+.flaw-list-item {
+  display: flex;
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.flaw-list-item:hover {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.flaw-list-item.active {
+  background: rgba(239, 68, 68, 0.06);
+  border-left: 3px solid var(--color-danger);
+}
+
+.flaw-list-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-size: 12px;
+}
+
+.flaw-list-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.flaw-list-name {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-main);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 2px;
+}
+
+.flaw-list-meta {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.flaw-list-category {
+  font-size: 9px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
+
+.flaw-list-endpoint {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: var(--text-dark);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@keyframes flawFadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Section switcher in details pane */
+.section-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border-color);
+  gap: 0;
+  margin-bottom: 16px;
+}
+
+.section-tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-muted);
+  padding: 8px 16px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-family: var(--font-sans);
+  position: relative;
+}
+
+.section-tab:hover {
+  color: var(--text-main);
+  background: rgba(255, 255, 255, 0.01);
+}
+
+.section-tab.active {
+  color: var(--color-primary);
+  border-bottom-color: var(--color-primary);
+}
+
+.section-tab .section-tab-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(139, 92, 246, 0.1);
+  color: var(--color-primary);
+  font-size: 9px;
+  font-weight: 700;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 5px;
+  border-radius: 8px;
+  margin-left: 4px;
+}
+
+.section-tab.flaws-tab {
+  color: var(--color-danger);
+}
+
+.section-tab.flaws-tab .section-tab-count {
+  background: var(--color-danger-glow);
+  color: var(--color-danger);
+}
+
+.section-tab.flaws-tab.active {
+  border-bottom-color: var(--color-danger);
+}
+

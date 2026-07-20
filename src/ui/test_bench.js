@@ -199,4 +199,174 @@ function setupClickListeners() {
     logToConsole('Scenario 6 finished.', 'success');
   });
 
+  // =============================
+  // LOGIC FLAW SCENARIOS
+  // =============================
+
+  // Flaw 1: IDOR - Sequential Object IDs
+  document.getElementById('btn-flaw-idor').addEventListener('click', async () => {
+    logToConsole('--- FLAW SCENARIO: IDOR Sequential IDs ---', 'info');
+
+    // Simulate requests to /api/users/1001, /api/users/1002, /api/users/1003
+    // These fetch the same fixture but the path structure triggers IDOR detection
+    await safeFetch('mock_responses/users.json', {
+      method: 'GET',
+      headers: { 'Accept': 'application/json' }
+    }, 'GET /api/users/1001');
+    await new Promise(resolve => setTimeout(resolve, 80));
+
+    await safeFetch('mock_responses/users.json', {
+      method: 'GET',
+      headers: { 'Accept': 'application/json' }
+    }, 'GET /api/users/1002');
+    await new Promise(resolve => setTimeout(resolve, 80));
+
+    await safeFetch('mock_responses/users.json', {
+      method: 'GET',
+      headers: { 'Accept': 'application/json' }
+    }, 'GET /api/users/1003');
+
+    // Also simulate a mutation with missing auth header to match IDOR-no-auth pattern
+    await safeFetch('mock_responses/check_permissions.json', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: 1001, action: 'update_profile' })
+    }, 'POST /api/admin/users/1001 (no auth)');
+
+    logToConsole('IDOR flaw scenario finished.', 'success');
+  });
+
+  // Flaw 2: Parameter Tampering - Price Manipulation
+  document.getElementById('btn-flaw-param-tamper').addEventListener('click', async () => {
+    logToConsole('--- FLAW SCENARIO: Parameter Tampering (Price) ---', 'info');
+
+    // Checkout with negative price and zero quantity
+    await safeFetch('mock_responses/check_permissions.json?fallback=checkout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        productId: 42,
+        price: -50.00,
+        quantity: 0,
+        discount: -100,
+        total: -150.00
+      })
+    }, 'POST /api/checkout (negative price + zero qty)');
+
+    logToConsole('Parameter tamper flaw scenario finished.', 'success');
+  });
+
+  // Flaw 3: Auth Privilege Escalation
+  document.getElementById('btn-flaw-auth').addEventListener('click', async () => {
+    logToConsole('--- FLAW SCENARIO: Privilege Escalation ---', 'info');
+
+    // Registration with client-supplied admin role
+    await safeFetch('mock_responses/users.json', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        username: 'attacker',
+        email: 'attacker@example.com',
+        password: 'password123',
+        role: 'admin',
+        isAdmin: true,
+        isPremium: true,
+        permissions: ['read', 'write', 'admin']
+      })
+    }, 'POST /api/register (client-supplied role=admin)');
+
+    logToConsole('Privilege escalation flaw scenario finished.', 'success');
+  });
+
+  // Flaw 4: Mass Assignment
+  document.getElementById('btn-flaw-mass-assign').addEventListener('click', async () => {
+    logToConsole('--- FLAW SCENARIO: Mass Assignment ---', 'info');
+
+    // Profile update with protected internal fields
+    await safeFetch('mock_responses/users.json', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: 'John Doe',
+        email: 'john@example.com',
+        isVerified: true,
+        isAdmin: true,
+        balance: 999999,
+        credit_limit: 1000000,
+        role: 'admin',
+        account_balance: 500000,
+        internalNotes: 'Approved for special access',
+        approved: true
+      })
+    }, 'PUT /api/users/profile (mass assignment)');
+
+    logToConsole('Mass assignment flaw scenario finished.', 'success');
+  });
+
+  // Flaw 5: Business Process Bypass
+  document.getElementById('btn-flaw-process-bypass').addEventListener('click', async () => {
+    logToConsole('--- FLAW SCENARIO: Process Bypass (Payment Without Cart) ---', 'info');
+
+    // Direct payment without any cart or checkout steps
+    await safeFetch('mock_responses/check_permissions.json?fallback=payment', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        amount: 199.99,
+        currency: 'USD',
+        card: '4111111111111111',
+        billing: { address: '123 Victim Ln' },
+        paymentMethod: 'credit_card'
+      })
+    }, 'POST /api/payment (no cart/checkout step)');
+
+    logToConsole('Process bypass flaw scenario finished.', 'success');
+  });
+
+  // Flaw 6: Injection Patterns
+  document.getElementById('btn-flaw-injection').addEventListener('click', async () => {
+    logToConsole('--- FLAW SCENARIO: Injection Patterns ---', 'info');
+
+    // Login with SQL injection in email and NoSQL operator in password
+    await safeFetch('mock_responses/users.json', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: "' OR '1'='1' --",
+        password: '{\"$ne\": \"\"}',
+        username: "1=1--"
+      })
+    }, 'POST /api/login (SQL + NoSQL injection)');
+
+    logToConsole('Injection flaw scenario finished.', 'success');
+  });
+
+  // Flaw 7: Race Condition TOCTOU
+  document.getElementById('btn-flaw-race').addEventListener('click', async () => {
+    logToConsole('--- FLAW SCENARIO: Race Condition (TOCTOU) ---', 'info');
+
+    // Step A: Check balance (GET verification)
+    await safeFetch('mock_responses/check_permissions.json?check=balance', {
+      method: 'GET',
+      headers: { 'Accept': 'application/json' }
+    }, 'GET /api/check-balance');
+
+    // Large delay creating a wide TOCTOU window (600ms)
+    logToConsole('TOCTOU window: 600ms gap between check and mutation...', 'warning');
+    await new Promise(resolve => setTimeout(resolve, 600));
+
+    // Step B: Withdraw mutation (POST)
+    await safeFetch('mock_responses/check_permissions.json?fallback=withdraw', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        accountId: 5001,
+        amount: 10000,
+        currency: 'USD'
+      })
+    }, 'POST /api/withdraw (600ms after balance check)');
+
+    logToConsole('Race condition flaw scenario finished.', 'success');
+  });
+
 }

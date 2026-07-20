@@ -1,9 +1,15 @@
 // DevTools Panel JS: Handles sessionization, heuristic evaluation, timeline rendering, and user interaction
 
+import { detectFlaws } from './flaws.js';
+
 // Global State
 let workflows = [];
 let selectedWorkflowId = null;
 let activeFilters = { text: '' };
+// Track current section tab in details pane
+let activeSectionTab = 'heuristics';
+// Track flaws-only view mode
+let flawsViewMode = false;
 
 // Settings State
 let settings = {
@@ -62,7 +68,11 @@ function saveSettings() {
   }
   
   // Re-run heuristics on all workflows with new settings
-  workflows.forEach(w => runHeuristics(w));
+  workflows.forEach(w => {
+    runHeuristics(w);
+    w.flaws = detectFlaws(w);
+    updateFlawSeverity(w);
+  });
   renderWorkflowList();
   updateDetailsPane();
   
@@ -141,7 +151,9 @@ function handleUserAction(action) {
     url: action.url,
     requests: [],
     heuristics: [],
+    flaws: [],
     severity: 'none',
+    flawSeverity: 'none',
     score: 0
   };
 
@@ -172,7 +184,9 @@ function getUnassociatedCluster(requestTime) {
       url: 'Multiple background tasks',
       requests: [],
       heuristics: [],
+      flaws: [],
       severity: 'none',
+      flawSeverity: 'none',
       score: 0
     };
     workflows.push(unassociated);
@@ -214,6 +228,10 @@ function handleNetworkRequest(request) {
 
   // Re-run heuristics for this workflow
   runHeuristics(targetWorkflow);
+  
+  // Run logic flaw detection
+  targetWorkflow.flaws = detectFlaws(targetWorkflow);
+  updateFlawSeverity(targetWorkflow);
   
   // Re-render
   renderWorkflowList();
@@ -678,6 +696,26 @@ function runHeuristics(workflow) {
   delete workflow.atomicity;
 }
 
+/**
+ * Update flaw severity based on highest severity flaw finding.
+ */
+function updateFlawSeverity(workflow) {
+  if (!workflow.flaws || workflow.flaws.length === 0) {
+    workflow.flawSeverity = 'none';
+    return;
+  }
+
+  const severityOrder = ['none', 'low', 'medium', 'high'];
+  let maxIdx = 0;
+
+  workflow.flaws.forEach(f => {
+    const idx = severityOrder.indexOf(f.severity);
+    if (idx > maxIdx) maxIdx = idx;
+  });
+
+  workflow.flawSeverity = severityOrder[maxIdx];
+}
+
 // =========================
 // HIGH-ONLY ATOMICITY TRAVERSAL (output/produce anchored)
 // =========================
@@ -888,6 +926,11 @@ function renderWorkflowList() {
     if (w.severity !== 'none') {
       severityBadge = `<span class="severity-indicator severity-${w.severity}">${w.severity}</span>`;
     }
+    // Flaw severity pill
+    let flawBadge = '';
+    if (w.flawSeverity && w.flawSeverity !== 'none') {
+      flawBadge = `<span class="severity-indicator severity-${w.flawSeverity}" style="background:rgba(239,68,68,0.08);color:#f87171;border:1px solid rgba(239,68,68,0.15);">🛡️ flaw</span>`;
+    }
 
     item.innerHTML = `
       <div class="item-top">
@@ -897,7 +940,7 @@ function renderWorkflowList() {
       <div class="item-desc" title="${escapeHtml(w.detail)}">${escapeHtml(w.detail)}</div>
       <div class="item-meta">
         <span class="item-req-count">${w.requests.length} request${w.requests.length === 1 ? '' : 's'}</span>
-        ${severityBadge}
+        ${severityBadge} ${flawBadge}
       </div>
     `;
 
@@ -941,6 +984,24 @@ function updateDetailsPane() {
   document.getElementById('detail-url').textContent = `Page URL: ${workflow.url}`;
   document.getElementById('detail-url').title = workflow.url;
 
+  // Update section tab counts
+  const heuristicsCount = document.getElementById('heuristics-count');
+  const flawsCount = document.getElementById('flaws-count');
+  if (heuristicsCount) heuristicsCount.textContent = workflow.heuristics.length;
+  if (flawsCount) flawsCount.textContent = workflow.flaws ? workflow.flaws.length : 0;
+
+  // Apply active section tab
+  document.querySelectorAll('.section-tab').forEach(tab => {
+    const section = tab.dataset.section;
+    tab.classList.toggle('active', section === activeSectionTab);
+  });
+
+  // Show/hide section content
+  const heuristicsSection = document.getElementById('findings-section-heuristics');
+  const flawsSection = document.getElementById('findings-section-flaws');
+  if (heuristicsSection) heuristicsSection.style.display = activeSectionTab === 'heuristics' ? 'block' : 'none';
+  if (flawsSection) flawsSection.style.display = activeSectionTab === 'flaws' ? 'block' : 'none';
+
   // Set Heuristic Diagnostics Cards
   const findingsSummary = document.getElementById('findings-summary');
   findingsSummary.innerHTML = '';
@@ -966,6 +1027,69 @@ function updateDetailsPane() {
       `;
       findingsSummary.appendChild(card);
     });
+  }
+
+  // Render Logic Flaw Findings
+  const flawsSummaryGrid = document.getElementById('flaws-summary-grid');
+  const flawsSummaryBar = document.getElementById('flaws-summary-bar');
+  
+  if (flawsSummaryGrid) {
+    flawsSummaryGrid.innerHTML = '';
+
+    if (!workflow.flaws || workflow.flaws.length === 0) {
+      flawsSummaryGrid.innerHTML = `
+        <div style="background-color: rgba(255,255,255,0.02); border: 1px dashed var(--border-color); padding: 16px; border-radius: 8px; font-size: 12px; color: var(--text-muted); text-align: center;">
+          No logic flaws detected in this workflow.
+        </div>
+      `;
+      if (flawsSummaryBar) flawsSummaryBar.style.display = 'none';
+    } else {
+      if (flawsSummaryBar) {
+        flawsSummaryBar.style.display = 'flex';
+        document.getElementById('flaws-summary-count').textContent = workflow.flaws.length;
+      }
+
+      // Sort flaws by severity (high first)
+      const severityOrder = { 'high': 0, 'medium': 1, 'low': 2 };
+      const sortedFlaws = [...workflow.flaws].sort((a, b) => {
+        const aIdx = severityOrder[a.severity] !== undefined ? severityOrder[a.severity] : 3;
+        const bIdx = severityOrder[b.severity] !== undefined ? severityOrder[b.severity] : 3;
+        return aIdx - bIdx;
+      });
+
+      sortedFlaws.forEach(f => {
+        const card = document.createElement('div');
+        card.className = `flaw-card severity-${f.severity}`;
+
+        // Category icon
+        const catIcon = getFlawCategoryIcon(f.category);
+
+        // Format evidence
+        let evidenceHtml = '';
+        if (f.evidence) {
+          try {
+            evidenceHtml = escapeHtml(JSON.stringify(f.evidence, null, 2));
+          } catch (_) {
+            evidenceHtml = escapeHtml(String(f.evidence));
+          }
+        }
+
+        card.innerHTML = `
+          <div class="flaw-card-icon flaw-cat-${f.category || 'idor'}">${catIcon}</div>
+          <div class="flaw-card-body">
+            <div class="flaw-card-header">
+              <span class="flaw-card-name">${escapeHtml(f.name)}</span>
+              <span class="flaw-severity-badge flaw-severity-${f.severity}">${f.severity}</span>
+              <span class="flaw-card-category">${escapeHtml(f.category || 'unknown')}</span>
+            </div>
+            <div class="flaw-card-description">${escapeHtml(f.description)}</div>
+            ${evidenceHtml ? `<div class="flaw-card-evidence">${evidenceHtml}</div>` : ''}
+            ${f.requestIndex !== undefined ? `<div style="margin-top:6px;font-size:10px;color:var(--text-dark);font-family:var(--font-mono);">Request #${f.requestIndex + 1}</div>` : ''}
+          </div>
+        `;
+        flawsSummaryGrid.appendChild(card);
+      });
+    }
   }
 
   // Build Timeline Visualizer
@@ -1292,6 +1416,17 @@ function setupUIEventListeners() {
     renderWorkflowList();
   });
 
+  // Section Tab switching (Heuristics vs Flaws)
+  document.querySelectorAll('.section-tab').forEach(tab => {
+    tab.addEventListener('click', (e) => {
+      const section = e.currentTarget.dataset.section;
+      if (section) {
+        activeSectionTab = section;
+        updateDetailsPane();
+      }
+    });
+  });
+
   // Import modal + dashboard actions
   setupImportUI();
 }
@@ -1616,6 +1751,11 @@ function finalizeImportedWorkflow(w) {
 
   // Run heuristics to populate findings
   runHeuristics(w);
+
+  // Run logic flaw detection on imported workflow
+  w.flaws = detectFlaws(w);
+  updateFlawSeverity(w);
+
   return w;
 }
 
@@ -1900,4 +2040,20 @@ function escapeHtml(str) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;');
+}
+
+/**
+ * Get emoji icon for a flaw category.
+ */
+function getFlawCategoryIcon(category) {
+  const icons = {
+    'idor': '\uD83D\uDD11',
+    'parameter-tampering': '\uD83D\uDCB0',
+    'auth-escalation': '\uD83D\uDEC2',
+    'mass-assignment': '\uD83D\uDCE6',
+    'process-bypass': '\uD83D\uDD04',
+    'input-validation': '\uD83D\uDCDD',
+    'race-condition': '\uD83C\uDFCE\uFE0F'
+  };
+  return icons[category] || '\u26A0\uFE0F';
 }

@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <title>Workflow Detector DevTools Panel</title>
   <link rel="stylesheet" href="panel.css">
+  <link rel="stylesheet" href="flaws.css">
 </head>
 <body class="dark-theme">
   <!-- Top Navigation Bar -->
@@ -179,9 +180,32 @@
 
         <!-- Heuristic Findings Summary Cards -->
         <div class="findings-section">
-          <h3>Workflow Diagnostics</h3>
-          <div id="findings-summary" class="findings-summary-grid">
-            <!-- Dynamic Heuristic Cards -->
+          <div class="section-tabs">
+            <button class="section-tab active" data-section="heuristics" id="section-tab-heuristics">
+              ⚙️ Diagnostics
+              <span class="section-tab-count" id="heuristics-count">0</span>
+            </button>
+            <button class="section-tab flaws-tab" data-section="flaws" id="section-tab-flaws">
+              🛡️ Logic Flaws
+              <span class="section-tab-count" id="flaws-count">0</span>
+            </button>
+          </div>
+          <div id="findings-section-heuristics">
+            <div id="findings-summary" class="findings-summary-grid">
+              <!-- Dynamic Heuristic Cards -->
+            </div>
+          </div>
+          <div id="findings-section-flaws" style="display: none;">
+            <!-- Flaws Dashboard Summary -->
+            <div id="flaws-summary-bar" class="flaws-summary-bar" style="display: none;">
+              <span class="flaws-summary-icon">⚠️</span>
+              <span class="flaws-summary-text">
+                <span class="flaws-summary-count" id="flaws-summary-count">0</span> logic flaw(s) detected in this workflow
+              </span>
+            </div>
+            <div id="flaws-summary-grid" class="findings-summary-grid">
+              <!-- Dynamic Flaw Cards -->
+            </div>
           </div>
         </div>
 
@@ -299,6 +323,6 @@
     </div>
   </div>
 
-  <script src="panel.js"></script>
+  <script type="module" src="panel.js"></script>
 </body>
 </html>
