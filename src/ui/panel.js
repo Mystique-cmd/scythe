@@ -2055,7 +2055,8 @@ function getFlawCategoryIcon(category) {
     'input-validation': '\uD83D\uDCDD',
     'race-condition': '\uD83C\uDFCE\uFE0F',
     'deserialization': '\uD83D\uDC7E',
-    'file-parser-vulns': '\uD83D\uDCC4'
+    'file-parser-vulns': '\uD83D\uDCC4',
+    'auth-bypass-state-manip': '\uD83D\uDD12'
   };
   return icons[category] || '\u26A0\uFE0F';
 }

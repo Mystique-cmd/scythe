@@ -14,6 +14,7 @@
  */
 
 import { detectFileParserVulnerabilities } from './file-parser-vulns.js';
+import { detectAuthBypassStateManip } from './auth-bypass-state-manip.js';
 
 // =========================
 // PUBLIC INTERFACE
@@ -49,6 +50,12 @@ export function detectFlaws(workflow) {
   const fileParserFindings = detectFileParserVulnerabilities(workflow);
   if (fileParserFindings.length > 0) {
     findings.push(...fileParserFindings);
+  }
+
+  // Auth Bypass via State Manipulation Detection
+  const authBypassFindings = detectAuthBypassStateManip(workflow);
+  if (authBypassFindings.length > 0) {
+    findings.push(...authBypassFindings);
   }
 
   return findings;
