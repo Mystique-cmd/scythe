@@ -107,6 +107,7 @@
 .flaw-cat-process-bypass { background: rgba(249, 115, 22, 0.12); color: #fb923c; }
 .flaw-cat-input-validation { background: rgba(236, 72, 153, 0.12); color: #f472b6; }
 .flaw-cat-race-condition { background: rgba(16, 185, 129, 0.12); color: #34d399; }
+.flaw-cat-deserialization { background: rgba(139, 92, 246, 0.15); color: #a78bfa; }
 
 /* Flaw Card — displayed in details pane */
 .flaw-card {

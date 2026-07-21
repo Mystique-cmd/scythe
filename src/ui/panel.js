@@ -2053,7 +2053,8 @@ function getFlawCategoryIcon(category) {
     'mass-assignment': '\uD83D\uDCE6',
     'process-bypass': '\uD83D\uDD04',
     'input-validation': '\uD83D\uDCDD',
-    'race-condition': '\uD83C\uDFCE\uFE0F'
+    'race-condition': '\uD83C\uDFCE\uFE0F',
+    'deserialization': '\uD83D\uDC7E'
   };
   return icons[category] || '\u26A0\uFE0F';
 }

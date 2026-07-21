@@ -40,6 +40,7 @@ export function detectFlaws(workflow) {
   detectProcessBypass(sortedReqs, workflow, findings);
   detectInputValidation(sortedReqs, findings);
   detectRaceCondition(sortedReqs, workflow, findings);
+  detectDeserialization(sortedReqs, workflow, findings);
 
   return findings;
 }
@@ -160,6 +161,163 @@ const ROLE_PARAM_NAMES = [
   'isAdmin', 'is_admin', 'isPremium', 'is_premium', 'admin',
   'privilege', 'privileges', 'group', 'groups', 'level'
 ];
+
+// =========================
+// DESERIALIZATION DETECTION CONSTANTS
+// =========================
+
+// Encoded magic bytes patterns for various serialization frameworks
+const DESERIALIZATION_PATTERNS = {
+  'Java (Serializable)': {
+    patterns: [
+      // Raw Java serialization magic bytes (aced0005)
+      { regex: /\baced0005[0-9a-f]{0,20}\b/i, confidence: 'high' },
+      // Base64-encoded Java serialization
+      { regex: /\brO0ABXNyAB[0-9A-Za-z+/=]{4,}\b/, confidence: 'high' },
+      { regex: /\brO0AB[0-9A-Za-z+/=]{10,}\b/, confidence: 'high' },
+      // Hex-encoded serialization stream header
+      { regex: /(?:\\x)?aced(?:\\x)?0005/i, confidence: 'high' }
+    ],
+    severity: 'high',
+    description: 'Java serialization stream detected (magic bytes ACED0005). Deserialization of untrusted Java objects can lead to remote code execution via gadget chains (e.g., CommonsCollections, Spring, Fastjson gadgets).'
+  },
+  'PHP (Serialized Object)': {
+    patterns: [
+      // PHP object serialization O:<class_name_length>:"<class_name>":<num_properties>:{...}
+      { regex: /O:\d+:"[^"]+":\d+:/, confidence: 'high' },
+      // PHP serialized array a:<num_elements>:{...}
+      { regex: /a:\d+:\{s:\d+:"[^"]+";/, confidence: 'medium' },
+      // PHP serialized with potential gadgets (laravel, wordpress, Drupal)
+      { regex: /O:\d+:"[^"]*\\[^"]*":/, confidence: 'high' },
+      // PHP serialized reference notation
+      { regex: /R:\d+;/, confidence: 'low' }
+    ],
+    severity: 'high',
+    description: 'PHP serialized object detected. PHP deserialization of user-supplied input can lead to remote code execution through POP (Property Oriented Programming) gadget chains, SQL injection, or file operations.'
+  },
+  'Python (Pickle)': {
+    patterns: [
+      // Pickle opcodes: os.system, subprocess.call, builtins.exec
+      { regex: /c(?:os|subprocess|builtins|__builtin__|nt|posix)\n(?:system|popen|call|exec|eval)\n/, confidence: 'high' },
+      // Pickle dict marker with string keys (dp0)
+      { regex: /\(dp\d+\nS'/, confidence: 'medium' },
+      // Pickle protocol 4+ (80 04) followed by pickle opcodes
+      { regex: /\x80\x04\x95/, confidence: 'high' },
+      // Base64 encoded pickle header
+      { regex: /\bgAN9cQ[0-9A-Za-z+/=]{5,}\b/, confidence: 'medium' },
+      // Pickle REDUCE opcode with callable
+      { regex: /R\(/g, confidence: 'medium' },
+      // Alternative pickle: GLOBAL + REDUCE pattern
+      { regex: /c__[a-z]+__\n\w+\n\(tR/, confidence: 'high' }
+    ],
+    severity: 'high',
+    description: 'Python Pickle serialization detected. Unpickling untrusted data can execute arbitrary Python code during deserialization via the __reduce__ protocol, __import__, or builtins.exec/__import__ gadget chains.'
+  },
+  '.NET (JSON.NET / BinaryFormatter)': {
+    patterns: [
+      // JSON.NET $type specifier
+      { regex: /\$type:\s*["']?[^"'\s,}]+\s*,\s*[^"'\s,}]+/i, confidence: 'high' },
+      // JSON.NET $type key in JSON
+      { regex: /"\$type"\s*:\s*"/, confidence: 'high' },
+      // .NET __type specifier (DataContractSerializer)
+      { regex: /"__type"\s*:\s*"/, confidence: 'high' },
+      // BinaryFormatter serialization header in Base64
+      { regex: /\bAAEAAAD\/\/\/\w+/, confidence: 'high' },
+      // .NET serialization type name
+      { regex: /TypeName=["']?[^"'\s,}]+,[^"'\s,}]+/i, confidence: 'medium' }
+    ],
+    severity: 'high',
+    description: '.NET deserialization pattern detected. Type specifiers ($type, __type) in JSON or BinaryFormatter payloads can lead to remote code execution through .NET gadget chains (e.g., ObjectDataProvider, WindowsIdentity, DataSet gadgets).'
+  },
+  'Ruby (Marshal)': {
+    patterns: [
+      // Ruby Marshal format header (04 08)
+      { regex: /\x04\x08o:/, confidence: 'high' },
+      // Ruby Marshal Base64
+      { regex: /\bBAhv[0-9A-Za-z+/=]{4,}\b/, confidence: 'high' },
+      // Ruby Marshal serialized object
+      { regex: /\x04\x08\{/, confidence: 'medium' }
+    ],
+    severity: 'high',
+    description: 'Ruby Marshal serialization detected. Deserializing untrusted Marshal data can result in remote code execution through object instantiation gadgets (e.g., Gem::StubSpecification, ActiveSupport::Deprecation).'
+  },
+  'YAML (Deserialization Tags)': {
+    patterns: [
+      // Java classes via YAML tags
+      { regex: /!!javax\.script\b/, confidence: 'high' },
+      { regex: /!!java\.lang\.(?:Runtime|ProcessBuilder|Exec)/, confidence: 'high' },
+      { regex: /!!javax\.(?:net|xml|management)/, confidence: 'high' },
+      // Python object tags in YAML
+      { regex: /!!python\/object/, confidence: 'high' },
+      { regex: /!!python\/module/, confidence: 'high' },
+      // Generic YAML tag with Java class
+      { regex: /!![a-z]+\.\w+\.\w+(?:\.\w+)*/, confidence: 'medium' },
+      // Custom YAML tag notation
+      { regex: /!<tag:yaml\.org[^>]+>/, confidence: 'medium' },
+      // SnakeYAML constructor bypass
+      { regex: /!!org\.yaml\.snakeyaml/, confidence: 'high' }
+    ],
+    severity: 'high',
+    description: 'YAML deserialization tag detected. Certain YAML parsers (SnakeYAML, PyYAML, ruby-psych) will instantiate arbitrary classes when processing tags, potentially leading to remote code execution.'
+  },
+  'Node.js (Prototype Pollution)': {
+    patterns: [
+      // __proto__ key in JSON
+      { regex: /"__proto__"\s*:/, confidence: 'high' },
+      // constructor.prototype in JSON keys
+      { regex: /"constructor"\s*:\s*\{[^}]*"prototype"\s*:/, confidence: 'high' },
+      // __proto__ in query string params
+      { regex: /[?&]__proto__[.=]/i, confidence: 'high' },
+      // __proto__ accessor in dotted notation
+      { regex: /__proto__\.\w+/, confidence: 'high' },
+      // constructor.prototype dotted notation in params
+      { regex: /constructor\.prototype\./, confidence: 'high' }
+    ],
+    severity: 'high',
+    description: 'Prototype pollution attack detected. Merging untrusted objects containing __proto__ or constructor.prototype keys can pollute Object.prototype, leading to property injection, security bypass, and in some cases remote code execution in Node.js/JavaScript applications.'
+  },
+  'XML (Deserialization Gadgets)': {
+    patterns: [
+      // ObjectDataProvider (PowerShell/Java XML deserialization gadget)
+      { regex: /<ObjectDataProvider\b/i, confidence: 'high' },
+      // xsi:type attribute in XML for polymorphic deserialization
+      { regex: /xsi:type\s*="/i, confidence: 'high' },
+      // XmlSerializer / DataContractSerializer hints
+      { regex: /<DataContract\b/i, confidence: 'medium' },
+      // Serialization binder redirects
+      { regex: /<SerializationBinder\b/i, confidence: 'medium' }
+    ],
+    severity: 'high',
+    description: 'XML deserialization gadget pattern detected. XML deserializers (XmlSerializer, DataContractSerializer) can instantiate arbitrary types via xsi:type, at-risk tags like ObjectDataProvider, leading to RCE.'
+  }
+};
+
+// Serialization framework name detection from URLs, headers, and paths
+const SERIALIZATION_HINTS = {
+  // Path/extension hints
+  pathHints: [
+    { pattern: /\.(?:php\d*)$/i, label: 'PHP', severity: 'medium' },
+    { pattern: /\.(?:py|pickle|pkl)$/i, label: 'Python', severity: 'medium' },
+    { pattern: /\.(?:rb|marshal)$/i, label: 'Ruby', severity: 'medium' },
+    { pattern: /\.(?:yaml|yml)$/i, label: 'YAML', severity: 'low' },
+    { pattern: /\.(?:aspx?|ashx|asmx|svc)$/i, label: '.NET', severity: 'medium' },
+    { pattern: /\.(?:jsp|do|action|jsf)$/i, label: 'Java', severity: 'medium' }
+  ],
+  // Content-Type hints
+  contentTypeHints: [
+    { pattern: /application\/x-java-serialized-object/i, label: 'Java', severity: 'high' },
+    { pattern: /application\/vnd\.php\-serialized/i, label: 'PHP', severity: 'high' },
+    { pattern: /application\/x-python-pickle/i, label: 'Python', severity: 'high' },
+    { pattern: /application\/x-ruby-marshal/i, label: 'Ruby', severity: 'high' },
+    { pattern: /application\/x-yaml/i, label: 'YAML', severity: 'high' },
+    { pattern: /application\/xml/i, label: 'XML', severity: 'low' }
+  ],
+  // Header hints (e.g., custom headers indicating serialization)
+  headerHints: [
+    { pattern: /x-serialization-format/i, label: 'Generic', severity: 'medium' },
+    { pattern: /x-deserialization-method/i, label: 'Generic', severity: 'high' }
+  ]
+};
 
 const PROTECTED_FIELD_NAMES = [
   'isAdmin', 'is_admin', 'role', 'roles', 'permissions',
@@ -1292,5 +1450,326 @@ function detectRaceCondition(sortedReqs, workflow, findings) {
       });
     }
   }
+}
+
+// =========================
+// DETECTOR: DESERIALIZATION BUGS
+// =========================
+/**
+ * Detect Deserialization Vulnerabilities:
+ * - Java serialization streams (ACED0005 bytes, Base64-encoded)
+ * - PHP serialized objects (O: syntax, a: arrays)
+ * - Python Pickle payloads (opcodes, GLOBAL+REDUCE patterns)
+ * - .NET type specifiers in JSON ($type, __type)
+ * - Ruby Marshal serialization (04 08 header)
+ * - YAML deserialization tags (!!javax, !!python, custom tags)
+ * - Node.js prototype pollution (__proto__, constructor.prototype)
+ * - XML deserialization gadgets (ObjectDataProvider, xsi:type)
+ * - Framework-specific serialization defined in DESERIALIZATION_PATTERNS
+ */
+function detectDeserialization(sortedReqs, workflow, findings) {
+  if (!Array.isArray(sortedReqs) || sortedReqs.length === 0) return;
+
+  // Track which request indices had which serialization finding
+  // to avoid duplicate findings for the same pattern type on the same request
+  const requestFindings = new Map(); // idx -> Set of pattern types
+
+  sortedReqs.forEach((req, idx) => {
+    const url = req.request.url || '';
+    const path = getPathname(url);
+    const params = getAllParams(req);
+    const bodyText = getRequestBodyText(req);
+    const body = tryParseJSON(bodyText);
+    const allTextValues = [];
+
+    // Collect all text to scan: query params, body keys+values, headers, URL path
+    Object.keys(params).forEach(key => {
+      const val = String(params[key]);
+      allTextValues.push(val);
+    });
+
+    // Full body text as raw string
+    if (bodyText) allTextValues.push(bodyText);
+
+    // URL path and query string
+    allTextValues.push(url);
+    allTextValues.push(path);
+
+    // Headers
+    const headers = req.request.headers || [];
+    headers.forEach(h => {
+      allTextValues.push(h.name || '');
+      allTextValues.push(h.value || '');
+    });
+
+    // Content-Type header separately for framework hints
+    const contentType = headers.find(h =>
+      (h.name || '').toLowerCase() === 'content-type'
+    );
+    const contentTypeValue = contentType ? (contentType.value || '') : '';
+
+    // GraphQL variables
+    if (req._graphql && req._graphql.operations) {
+      req._graphql.operations.forEach(op => {
+        if (op.variables && typeof op.variables === 'object') {
+          Object.keys(op.variables).forEach(vk => {
+            allTextValues.push(String(op.variables[vk]));
+          });
+        }
+      });
+    }
+
+    // Check for binary/base64 content in body that might indicate serialization
+    const isBase64Encoded = (str) => {
+      if (!str || str.length < 20) return false;
+      // Base64 strings are typically long and alphanumeric with +/=
+      return /^[A-Za-z0-9+/=]{20,}$/.test(str.trim());
+    };
+
+    const isHexEncoded = (str) => {
+      if (!str || str.length < 20) return false;
+      return /^[0-9a-f]{20,}$/i.test(str.trim());
+    };
+
+    // 1. Check DESERIALIZATION_PATTERNS against all text values
+    Object.entries(DESERIALIZATION_PATTERNS).forEach(([frameworkName, config]) => {
+      const frameworkKey = frameworkName.toLowerCase().replace(/[^a-z0-9]/g, '-');
+
+      // Check each pattern
+      for (const pEntry of config.patterns) {
+        let matched = false;
+        let matchedValue = '';
+
+        // Check against all collected text values
+        for (const txt of allTextValues) {
+          if (pEntry.regex.test(txt)) {
+            matched = true;
+            matchedValue = txt.substring(0, 100);
+            break;
+          }
+        }
+
+        // If not found in text, check raw body as base64/hex for binary serialization
+        if (!matched && bodyText) {
+          const cleanBody = bodyText.trim();
+          if (isBase64Encoded(cleanBody) && isHexEncoded(cleanBody)) {
+            // Could be binary payload encoded
+            if (pEntry.regex.test(cleanBody)) {
+              matched = true;
+              matchedValue = cleanBody.substring(0, 100);
+            }
+          }
+        }
+
+        if (!matched) continue;
+
+        // Check if we already flagged this request for this pattern type
+        if (!requestFindings.has(idx)) requestFindings.set(idx, new Set());
+        const reqFindings = requestFindings.get(idx);
+        const findId = `deserialization-${frameworkKey}`;
+
+        if (reqFindings.has(findId)) continue;
+        reqFindings.add(findId);
+
+        const finding = {
+          id: findId,
+          category: 'deserialization',
+          name: `${frameworkName} Deserialization Detected`,
+          description: config.description,
+          severity: config.severity,
+          requestIndex: idx,
+          evidence: {
+            framework: frameworkName,
+            matchedValue: matchedValue,
+            url: path,
+            method: req.request.method,
+            contentType: contentTypeValue || 'unknown',
+            confidence: pEntry.confidence
+          },
+          score: pEntry.confidence === 'high' ? 85 : (pEntry.confidence === 'medium' ? 60 : 35)
+        };
+
+        findings.push(finding);
+        break; // Only one finding per framework per request
+      }
+    });
+
+    // 2. Check Content-Type header for serialization-specific MIME types
+    if (contentTypeValue) {
+      SERIALIZATION_HINTS.contentTypeHints.forEach(hint => {
+        if (hint.pattern.test(contentTypeValue)) {
+          const findId = `deserialization-content-type-${hint.label.toLowerCase().replace(/[^a-z0-9]/g, '-')}`;
+          if (requestFindings.has(idx) && requestFindings.get(idx).has(findId)) return;
+          if (!requestFindings.has(idx)) requestFindings.set(idx, new Set());
+          requestFindings.get(idx).add(findId);
+
+          findings.push({
+            id: findId,
+            category: 'deserialization',
+            name: `${hint.label} Serialization Content-Type`,
+            description: `Request uses Content-Type \`${contentTypeValue}\` which indicates ${hint.label} serialized data. Deserializing untrusted ${hint.label} objects can lead to remote code execution.`,
+            severity: hint.severity,
+            requestIndex: idx,
+            evidence: {
+              contentType: contentTypeValue,
+              framework: hint.label,
+              url: path
+            },
+            score: hint.severity === 'high' ? 80 : 50
+          });
+        }
+      });
+    }
+
+    // 3. Check endpoint path/file extension for serialization framework hints
+    SERIALIZATION_HINTS.pathHints.forEach(hint => {
+      if (hint.pattern.test(path)) {
+        const findId = `deserialization-path-hint-${hint.label.toLowerCase().replace(/[^a-z0-9]/g, '-')}`;
+        if (requestFindings.has(idx) && requestFindings.get(idx).has(findId)) return;
+
+        // Only flag if there's also some request body data (indicates serialized payload being sent)
+        if (!bodyText && Object.keys(params).length === 0) return;
+        if (!bodyText && !isMutatingRequest(req)) return;
+
+        if (!requestFindings.has(idx)) requestFindings.set(idx, new Set());
+        requestFindings.get(idx).add(findId);
+
+        findings.push({
+          id: findId,
+          category: 'deserialization',
+          name: `Potential ${hint.label} Deserialization Endpoint`,
+          description: `Request targets a \`${hint.label}\`-associated endpoint (\`${path}\`). ${hint.label} deserialization of untrusted data is a common RCE vector and should be carefully validated.`,
+          severity: hint.severity,
+          requestIndex: idx,
+          evidence: {
+            path: path,
+            framework: hint.label,
+            method: req.request.method
+          },
+          score: hint.severity === 'medium' ? 55 : 30
+        });
+      }
+    });
+
+    // 4. Check custom header hints for serialization
+    headers.forEach(h => {
+      const hName = h.name || '';
+      const hValue = h.value || '';
+      SERIALIZATION_HINTS.headerHints.forEach(hint => {
+        if (hint.pattern.test(hName)) {
+          const findId = `deserialization-header-hint-${hint.label.toLowerCase().replace(/[^a-z0-9]/g, '-')}-${hName.toLowerCase().replace(/[^a-z0-9]/g, '-')}`;
+          if (requestFindings.has(idx) && requestFindings.get(idx).has(findId)) return;
+          if (!requestFindings.has(idx)) requestFindings.set(idx, new Set());
+          requestFindings.get(idx).add(findId);
+
+          findings.push({
+            id: findId,
+            category: 'deserialization',
+            name: `Custom Serialization Header Detected`,
+            description: `Request includes custom header \`${hName}: ${hValue.substring(0, 80)}\` which may indicate a custom deserialization mechanism or serialization format.`,
+            severity: hint.severity,
+            requestIndex: idx,
+            evidence: {
+              headerName: hName,
+              headerValue: hValue.substring(0, 120),
+              url: path
+            },
+            score: hint.severity === 'high' ? 70 : 40
+          });
+        }
+      });
+    });
+
+    // 5. Deep inspection: if JSON body, check for nested suspicious patterns
+    if (body && typeof body === 'object' && bodyText) {
+      const jsonStr = bodyText;
+
+      // Deep scan for prototype pollution in nested objects
+      const scanForProtoPollution = (obj, path = '') => {
+        if (!obj || typeof obj !== 'object') return;
+        Object.keys(obj).forEach(k => {
+          const currentPath = path ? `${path}.${k}` : k;
+          if (k === '__proto__' || k === 'constructor') {
+            const val = obj[k];
+            if (val && typeof val === 'object') {
+              // Check if we already flagged this
+              const findId = `deserialization-deep-proto-pollution`;
+              if (requestFindings.has(idx) && requestFindings.get(idx).has(findId)) return;
+              if (!requestFindings.has(idx)) requestFindings.set(idx, new Set());
+              requestFindings.get(idx).add(findId);
+
+              findings.push({
+                id: findId,
+                category: 'deserialization',
+                name: 'Deep Prototype Pollution in JSON Body',
+                description: `Nested prototype pollution detected in JSON body at path \`${currentPath}\`. This can lead to Object.prototype pollution and security bypass in Node.js applications.`,
+                severity: 'high',
+                requestIndex: idx,
+                evidence: {
+                  jsonPath: currentPath,
+                  key: k,
+                  url: path
+                },
+                score: 85
+              });
+            }
+          }
+          scanForProtoPollution(val, currentPath);
+        });
+      };
+      scanForProtoPollution(body);
+
+      // Check for mixed serialization in JSON values (serialized strings inside JSON)
+      Object.keys(body).forEach(key => {
+        const val = String(body[key]);
+        // Check for PHP serialization inside JSON string values
+        if (/^O:\d+:"/i.test(val) || /^a:\d+:\{/i.test(val) || /^s:\d+:"/i.test(val)) {
+          const findId = `deserialization-php-in-json`;
+          if (requestFindings.has(idx) && requestFindings.get(idx).has(findId)) return;
+          if (!requestFindings.has(idx)) requestFindings.set(idx, new Set());
+          requestFindings.get(idx).add(findId);
+
+          findings.push({
+            id: findId,
+            category: 'deserialization',
+            name: 'PHP Serialized Object Inside JSON',
+            description: `JSON field \`${key}\` contains a PHP serialized object string. This is a common pattern for PHP applications that accept JSON but unserialize nested data, leading to RCE through PHP gadget chains.`,
+            severity: 'high',
+            requestIndex: idx,
+            evidence: {
+              field: key,
+              matchedValue: val.substring(0, 80),
+              url: path
+            },
+            score: 85
+          });
+        }
+
+        // Check for Base64-encoded Java serialization inside JSON values
+        const cleanVal = val.trim();
+        if (cleanVal.startsWith('rO0AB') && cleanVal.length > 30) {
+          const findId = `deserialization-java-in-json`;
+          if (requestFindings.has(idx) && requestFindings.get(idx).has(findId)) return;
+          if (!requestFindings.has(idx)) requestFindings.set(idx, new Set());
+          requestFindings.get(idx).add(findId);
+
+          findings.push({
+            id: findId,
+            category: 'deserialization',
+            name: 'Java Serialized Object Inside JSON',
+            description: `JSON field \`${key}\` contains a Base64-encoded Java serialized object. This pattern is used in Java applications that accept JSON payloads and deserialize embedded serialized Java objects.`,
+            severity: 'high',
+            requestIndex: idx,
+            evidence: {
+              field: key,
+              matchedValue: cleanVal.substring(0, 80) + '...',
+              url: path
+            },
+            score: 90
+          });
+        }
+      });
+    }
+  });
 }
 

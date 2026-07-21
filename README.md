@@ -24,7 +24,7 @@ A Chrome DevTools extension (Manifest V3) that monitors network activity (XHR, f
 - **Interactive Inspector**: Opens a request "drawer" to review headers, payloads, and response content.
 
 ### Logic Flaws Detection Engine
-Seven heuristic detectors that analyze request parameters, body payloads, and cross-request sequencing for common business logic vulnerabilities:
+Eight heuristic detectors that analyze request parameters, body payloads, and cross-request sequencing for common business logic vulnerabilities:
 
 | Detector | Description | Severity Factors |
 |----------|-------------|-----------------|
@@ -35,6 +35,7 @@ Seven heuristic detectors that analyze request parameters, body payloads, and cr
 | **Business Process Bypass** | Detects workflow step-skipping: payment without cart/checkout, write operations without validation, privileged operations without authentication, and out-of-order process execution. | All patterns -> `high` |
 | **Input Validation Flaws** | Detects SQL injection, NoSQL injection (`$ne`, `$gt`, `$regex`), XSS, path traversal, null/undefined boundary values, type confusion, and control character injection in request parameters. | Injection/traversal/control chars -> `high`; Null fields/type confusion -> `medium` |
 | **Race Condition / TOCTOU** | Analyzes check-then-act timing windows (gap > 50ms between guard completion and mutation start), missing optimistic locking headers (`If-Match`, `ETag`), and rapid concurrent mutations on the same resource path group. | Gap > 500ms -> `high`; Gap > 200ms -> `medium`; Missing versioning -> `medium`; Racey concurrent mutations -> `medium`/`high` |
+| **Deserialization Bugs** | Detects serialized object payloads across multiple frameworks: Java (ACED0005 magic bytes, Base64 `rO0AB`), PHP (O: syntax, a: arrays), Python Pickle (opcodes, GLOBAL+REDUCE), .NET (`$type`, `__type`), Ruby Marshal (`\\x04\\x08`), YAML deserialization tags (`!!javax`, `!!python`), Node.js prototype pollution (`__proto__`), and XML deserialization gadgets. Also flags serialization-specific Content-Types, endpoint extensions, and custom headers. | High-confidence serialization match -> `high`; Medium-confidence -> `high`/`medium`; Path/Content-Type hints -> `medium`/`low` |
 
 ### Import, Export & Offline Analysis
 - **Import File**: Upload **HAR (HTTP Archive)** logs or previously exported **Scythe JSON** files for offline analysis.
