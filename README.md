@@ -36,6 +36,7 @@ Eight heuristic detectors that analyze request parameters, body payloads, and cr
 | **Input Validation Flaws** | Detects SQL injection, NoSQL injection (`$ne`, `$gt`, `$regex`), XSS, path traversal, null/undefined boundary values, type confusion, and control character injection in request parameters. | Injection/traversal/control chars -> `high`; Null fields/type confusion -> `medium` |
 | **Race Condition / TOCTOU** | Analyzes check-then-act timing windows (gap > 50ms between guard completion and mutation start), missing optimistic locking headers (`If-Match`, `ETag`), and rapid concurrent mutations on the same resource path group. | Gap > 500ms -> `high`; Gap > 200ms -> `medium`; Missing versioning -> `medium`; Racey concurrent mutations -> `medium`/`high` |
 | **Deserialization Bugs** | Detects serialized object payloads across multiple frameworks: Java (ACED0005 magic bytes, Base64 `rO0AB`), PHP (O: syntax, a: arrays), Python Pickle (opcodes, GLOBAL+REDUCE), .NET (`$type`, `__type`), Ruby Marshal (`\\x04\\x08`), YAML deserialization tags (`!!javax`, `!!python`), Node.js prototype pollution (`__proto__`), and XML deserialization gadgets. Also flags serialization-specific Content-Types, endpoint extensions, and custom headers. | High-confidence serialization match -> `high`; Medium-confidence -> `high`/`medium`; Path/Content-Type hints -> `medium`/`low` |
+| **File Parser Vulnerabilities** | Detects 9 categories of file-handling vulnerabilities: Path Traversal (`../`, URL-encoded), LFI/RFI (PHP wrappers like `php://filter`, `expect://`), SSRF via `file://` protocol & internal IPs, File Upload (dangerous extensions like `.php`, `.jsp`, double extensions, null bytes), XXE Injection (DOCTYPE, ENTITY with SYSTEM, file reads), Zip Slip / Archive Traversal, Log Poisoning (PHP code injection in User-Agent/Cookie/Referer), Server-Side File Operations Abuse (reading `/etc/passwd`, `.env`, configs), and File Permission Exposure (`.git`, `.svn`, `.bak`, `.DS_Store`). | Path traversal/LFI/RFI/XXE -> `high`; File upload (dangerous ext) -> `high`; SSRF/internal IPs -> `high`; Zip Slip -> `high`; Log poisoning -> `high`; Sensitive file access -> `high`; Permission exposure -> `high`/`medium`; Oversized uploads -> `medium` |
 
 ### Import, Export & Offline Analysis
 - **Import File**: Upload **HAR (HTTP Archive)** logs or previously exported **Scythe JSON** files for offline analysis.
@@ -66,8 +67,9 @@ scythe/
         ├── panel.html            # DevTools panel structure (split-pane workspace)
         ├── panel.css             # High-fidelity dark mode stylesheet (glassmorphism)
         ├── panel.js              # State engine, sessionizer, heuristics & UI renderer
-        ├── flaws.js              # Logic flaws detection engine (7 detectors)
+        ├── flaws.js              # Logic flaws detection engine (7 detectors + file parser vulns)
         ├── flaws.css             # Logic flaws UI styles (cards, badges, severity colors)
+        ├── file-parser-vulns.js  # File parser vulnerabilities detection (9 detectors)
         ├── test_bench.html       # Sandbox UI to trigger mock scenarios
         ├── test_bench.js         # HTTP simulation triggers (orchestration + flaw scenarios)
         └── mock_responses/       # Local JSON fixtures for offline testing

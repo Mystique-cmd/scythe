@@ -10,7 +10,10 @@
  *   - Business Process Bypass
  *   - Input Validation Flaws
  *   - Race Condition / TOCTOU
+ *   - File Parser Vulnerabilities (path traversal, LFI/RFI, SSRF, XXE, etc.)
  */
+
+import { detectFileParserVulnerabilities } from './file-parser-vulns.js';
 
 // =========================
 // PUBLIC INTERFACE
@@ -41,6 +44,12 @@ export function detectFlaws(workflow) {
   detectInputValidation(sortedReqs, findings);
   detectRaceCondition(sortedReqs, workflow, findings);
   detectDeserialization(sortedReqs, workflow, findings);
+
+  // File Parser Vulnerabilities Detection
+  const fileParserFindings = detectFileParserVulnerabilities(workflow);
+  if (fileParserFindings.length > 0) {
+    findings.push(...fileParserFindings);
+  }
 
   return findings;
 }
