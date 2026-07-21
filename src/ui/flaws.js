@@ -11,11 +11,15 @@
  *   - Input Validation Flaws
  *   - Race Condition / TOCTOU
  *   - File Parser Vulnerabilities (path traversal, LFI/RFI, SSRF, XXE, etc.)
+ *   - Auth Bypass via State Manipulation (JWT, session, OAuth, MFA, etc.)
+ *   - Prototype Pollution (__proto__, constructor.prototype, merge abuse, etc.)
+ *   - Memory / Web Context Issues (DOM clobbering, cache poisoning, storage manip, etc.)
  */
 
 import { detectFileParserVulnerabilities } from './file-parser-vulns.js';
 import { detectAuthBypassStateManip } from './auth-bypass-state-manip.js';
 import { detectPrototypePollution } from './prototype-pollution.js';
+import { detectMemoryWebContext } from './memory-web-context.js';
 
 // =========================
 // PUBLIC INTERFACE
@@ -63,6 +67,12 @@ export function detectFlaws(workflow) {
   const prototypePollutionFindings = detectPrototypePollution(workflow);
   if (prototypePollutionFindings.length > 0) {
     findings.push(...prototypePollutionFindings);
+  }
+
+  // Memory-Related Issues in Web Context Detection
+  const memoryWebContextFindings = detectMemoryWebContext(workflow);
+  if (memoryWebContextFindings.length > 0) {
+    findings.push(...memoryWebContextFindings);
   }
 
   return findings;

@@ -111,6 +111,7 @@
 .flaw-cat-file-parser-vulns { background: rgba(250, 204, 21, 0.12); color: #facc15; }
 .flaw-cat-auth-bypass-state-manip { background: rgba(236, 72, 153, 0.12); color: #f472b6; }
 .flaw-cat-prototype-pollution { background: rgba(34, 211, 238, 0.12); color: #67e8f9; }
+.flaw-cat-memory-web-context { background: rgba(251, 191, 36, 0.12); color: #fbbf24; }
 
 /* Flaw Card — displayed in details pane */
 .flaw-card {

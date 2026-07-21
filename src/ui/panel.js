@@ -2057,7 +2057,8 @@ function getFlawCategoryIcon(category) {
     'deserialization': '\uD83D\uDC7E',
     'file-parser-vulns': '\uD83D\uDCC4',
     'auth-bypass-state-manip': '\uD83D\uDD12',
-    'prototype-pollution': '\uD83E\uDD16'
+    'prototype-pollution': '\uD83E\uDD16',
+    'memory-web-context': '\uD83E\uDDE0'
   };
   return icons[category] || '\u26A0\uFE0F';
 }
