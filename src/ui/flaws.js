@@ -15,6 +15,7 @@
 
 import { detectFileParserVulnerabilities } from './file-parser-vulns.js';
 import { detectAuthBypassStateManip } from './auth-bypass-state-manip.js';
+import { detectPrototypePollution } from './prototype-pollution.js';
 
 // =========================
 // PUBLIC INTERFACE
@@ -56,6 +57,12 @@ export function detectFlaws(workflow) {
   const authBypassFindings = detectAuthBypassStateManip(workflow);
   if (authBypassFindings.length > 0) {
     findings.push(...authBypassFindings);
+  }
+
+  // Prototype Pollution Detection
+  const prototypePollutionFindings = detectPrototypePollution(workflow);
+  if (prototypePollutionFindings.length > 0) {
+    findings.push(...prototypePollutionFindings);
   }
 
   return findings;
