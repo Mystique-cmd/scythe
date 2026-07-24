@@ -46,7 +46,7 @@ function notifyUserAction(type, detail) {
     }
   };
   try {
-    chrome.runtime.sendMessage(message);
+    chrome.runtime.sendMessage(message).catch(() => {});
   } catch (e) {
     // Ignore context invalidated errors when extension is reloaded
   }
@@ -75,7 +75,7 @@ function notifyNewTabIntent({ href, sourceUrl }) {
   };
 
   try {
-    chrome.runtime.sendMessage(message);
+    chrome.runtime.sendMessage(message).catch(() => {});
   } catch (e) {
     // Ignore context invalidated errors when extension is reloaded
   }

@@ -96,8 +96,8 @@ function setupConnection() {
     tabId: chrome.devtools.inspectedWindow.tabId
   });
 
-  // Listen to user actions from the content script via background.js
-backgroundPageConnection.onMessage.addListener((message) => {
+  // Listen to messages from the background script (user actions + web requests)
+  backgroundPageConnection.onMessage.addListener((message) => {
     if (!message || !message.type) return;
 
     if (message.type === 'USER_ACTION') {
@@ -115,15 +115,6 @@ backgroundPageConnection.onMessage.addListener((message) => {
     if (message.type === 'TRACKED_TAB') {
       // no-op for now
       return;
-    }
-  });
-
-  // Network requests now arrive from background.js via postMessage.
-  // We intentionally do not use chrome.devtools.network.* so we can also capture requests
-  // from newly opened tabs.
-  backgroundPageConnection.onMessage.addListener((message) => {
-    if (message && message.type === 'WEBREQUEST' && message.request) {
-      handleNetworkRequest(message.request);
     }
   });
 }

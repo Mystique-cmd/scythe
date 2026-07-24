@@ -8,6 +8,11 @@ chrome.runtime.onConnect.addListener((port) => {
     // inspected page, so we expect the devtools page to send it explicitly.
     if (message.name === 'init') {
       connections[message.tabId] = port;
+      // Add the inspected tab to trackedTabIds so webRequest events
+      // from this tab are captured immediately.
+      if (typeof message.tabId === 'number') {
+        trackedTabIds.add(message.tabId);
+      }
       console.log(`[Workflow Detector] DevTools panel connected for tab: ${message.tabId}`);
       return;
     }
@@ -42,6 +47,15 @@ setInterval(() => {
     newTabIntents.shift();
   }
 }, 1000);
+
+// Helper: send message to all connected DevTools panels
+function sendToPanel(message) {
+  Object.keys(connections).forEach((tid) => {
+    try {
+      connections[tid].postMessage(message);
+    } catch (_) {}
+  });
+}
 
 function urlLooksLikeMatch(haystackUrl, needleUrl) {
   // Compare by exact or by hostname match.
@@ -90,6 +104,17 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 
 // Receive messages from content script
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  // Process NEW_TAB_INTENT messages: populate newTabIntents so that
+  // onCreated/onUpdated can correlate new tabs to tracked traffic.
+  if (message.type === 'NEW_TAB_INTENT' && message.intent) {
+    newTabIntents.push({
+      destUrl: message.intent.destUrl || message.intent.href,
+      href: message.intent.href,
+      sourceUrl: message.intent.sourceUrl,
+      timestamp: message.intent.timestamp || Date.now()
+    });
+  }
+
   // Messages from content scripts should have sender.tab
   if (sender.tab) {
     const tabId = sender.tab.id;
@@ -98,6 +123,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (tabId in connections) {
       connections[tabId].postMessage(message);
       return true;
+    }
+
+    // For tracked tabs or any tab with events, add to tracked set
+    // so webRequest events are captured.
+    if (typeof tabId === 'number' && !trackedTabIds.has(tabId)) {
+      trackedTabIds.add(tabId);
     }
 
     // Minimal fix: when workflows happen in newly opened tabs,
@@ -131,15 +162,6 @@ function getStartedDateTimeMs(startEpochMs) {
   return new Date(startEpochMs).toISOString();
 }
 
-function sendToPanel(message) {
-  // Broadcast to all connected devtools panels
-  Object.keys(connections).forEach((tid) => {
-    try {
-      connections[tid].postMessage(message);
-    } catch (_) {}
-  });
-}
-
 // Capture request start
 chrome.webRequest.onBeforeRequest.addListener(
   (details) => {
@@ -155,13 +177,50 @@ chrome.webRequest.onBeforeRequest.addListener(
       url: details.url,
       method: details.method,
       requestHeaders: toPlainHeaders(details.requestHeaders),
-      // We only support queryString-derived routing; postData is not accessible in webRequest without extra.
-      // Keep compatibility for heuristics by setting empty postData.
+      requestBody: details.requestBody || null
     });
   },
   { urls: ['<all_urls>'] },
-  ['extraHeaders']
+  ['requestHeaders', 'requestBody', 'extraHeaders']
 );
+
+// Helper to extract postData text from webRequest requestBody
+function extractPostData(requestBody) {
+  if (!requestBody) return null;
+  if (requestBody.formData) {
+    // Form data: convert to URL-encoded string
+    const params = new URLSearchParams();
+    Object.keys(requestBody.formData).forEach(key => {
+      const vals = requestBody.formData[key];
+      if (Array.isArray(vals)) {
+        vals.forEach(v => params.append(key, v));
+      } else {
+        params.append(key, vals);
+      }
+    });
+    return { text: params.toString() };
+  }
+  if (requestBody.raw && requestBody.raw.length > 0) {
+    // Raw bytes: convert first chunk to text (UTF-8)
+    try {
+      const decoder = new TextDecoder('utf-8', { fatal: false });
+      let text = '';
+      for (const chunk of requestBody.raw) {
+        if (chunk.bytes) {
+          text += decoder.decode(chunk.bytes, { stream: true });
+        }
+      }
+      text += decoder.decode();
+      if (text) {
+        return { text };
+      }
+    } catch (_) {}
+  }
+  if (requestBody.error) {
+    return null;
+  }
+  return null;
+}
 
 // Capture request end (success)
 chrome.webRequest.onCompleted.addListener(
@@ -178,7 +237,7 @@ chrome.webRequest.onCompleted.addListener(
       url: entry.url,
       headers: entry.requestHeaders || [],
       queryString: [],
-      postData: null
+      postData: extractPostData(entry.requestBody)
     };
 
     const responseObj = {
@@ -220,7 +279,7 @@ chrome.webRequest.onErrorOccurred.addListener(
       url: entry.url,
       headers: entry.requestHeaders || [],
       queryString: [],
-      postData: null
+      postData: extractPostData(entry.requestBody)
     };
 
     const responseObj = {
