@@ -838,7 +838,7 @@ function detectXXEInjection(sortedReqs, findings) {
       id: findId,
       category: 'file-parser-vulns',
       name: 'XML External Entity (XXE) Injection',
-      description: `Detected ${xxeMatches.length} XXE pattern(s) in XML payload. XXE injection can read local files (\\`file://\\`), perform SSRF, trigger denial of service (Billion Laughs), or exfiltrate data via out-of-band channels. Severity ranges from information disclosure to remote code execution.`,
+      description: 'Detected ' + xxeMatches.length + ' XXE pattern(s) in XML payload. XXE injection can read local files (`file://`), perform SSRF, trigger denial of service (Billion Laughs), or exfiltrate data via out-of-band channels. Severity ranges from information disclosure to remote code execution.',
       severity,
       requestIndex: idx,
       evidence: {

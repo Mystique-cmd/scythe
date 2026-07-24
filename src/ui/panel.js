@@ -96,7 +96,7 @@ function setupConnection() {
     tabId: chrome.devtools.inspectedWindow.tabId
   });
 
-  // Listen to messages from the background script (user actions + web requests)
+// Listen to messages from the background script (user actions + web requests)
   backgroundPageConnection.onMessage.addListener((message) => {
     if (!message || !message.type) return;
 
@@ -118,6 +118,8 @@ function setupConnection() {
     }
   });
 }
+
+// === END of setupConnection ===
 
 // Helper: Generate Unique ID
 function generateId() {

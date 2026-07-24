@@ -2,6 +2,11 @@
 
 const connections = {};
 
+// NEW TAB tracking intents (short-lived) + tracked tab state
+const newTabIntents = [];
+const trackedTabIds = new Set();
+const trackedUntilMs = 5000; // keep intents for 5s
+
 chrome.runtime.onConnect.addListener((port) => {
   const extensionListener = (message, sender, sendResponse) => {
     // The original connection event doesn't include the tab ID of the
@@ -34,11 +39,6 @@ chrome.runtime.onConnect.addListener((port) => {
     }
   });
 });
-
-// NEW TAB tracking intents (short-lived) + tracked tab state
-const newTabIntents = [];
-const trackedTabIds = new Set();
-const trackedUntilMs = 5000; // keep intents for 5s
 
 // Cleanup intents periodically
 setInterval(() => {
